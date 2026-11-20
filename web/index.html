@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#efefec">
+    <title>winedroid</title>
+    <meta name="description" content="Run an Android APK in your browser with winedroid.">
+    <link rel="stylesheet" href="style.css">
+  </head>
+  <body>
+    <main class="stage">
+      <section class="phone-shell" aria-label="winedroid APK runner">
+        <div class="phone-controls" aria-hidden="true">
+          <span class="phone-control phone-control-action"></span>
+          <span class="phone-control phone-control-volume-up"></span>
+          <span class="phone-control phone-control-volume-down"></span>
+          <span class="phone-control phone-control-power"></span>
+        </div>
+        <div class="phone-seams" aria-hidden="true">
+          <span class="phone-seam phone-seam-left-top"></span>
+          <span class="phone-seam phone-seam-left-bottom"></span>
+          <span class="phone-seam phone-seam-right-top"></span>
+          <span class="phone-seam phone-seam-right-bottom"></span>
+        </div>
+        <div class="phone-sensors" aria-hidden="true">
+          <span class="phone-earpiece"></span>
+          <span class="phone-camera"></span>
+        </div>
+        <span class="phone-home-indicator" aria-hidden="true"></span>
+        <div
+          class="phone-screen"
+          id="phone-screen"
+          data-state="prompt"
+          data-display-width="420"
+          data-display-height="910"
+        >
+          <label class="drop-zone" id="drop-zone" for="apk-input">
+            <span id="prompt-text" role="status" aria-live="polite">paste apk in here</span>
+            <input id="apk-input" type="file" accept=".apk,application/vnd.android.package-archive">
+          </label>
+
+          <div class="loader" id="loader" role="status" aria-live="polite" hidden>
+            <img src="assets/winedroid-logo.png" alt="WineDroid" width="1500" height="274">
+            <div
+              class="progress-track"
+              id="progress-bar"
+              role="progressbar"
+              aria-label="Loading APK"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              aria-valuenow="0"
+              tabindex="-1"
+            >
+              <span id="progress-fill"></span>
+            </div>
+          </div>
+
+          <canvas id="winedroid-canvas" hidden></canvas>
+          <span class="phone-glass-reflection" aria-hidden="true"></span>
+        </div>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+    <script src="dist/winedroid.js"></script>
+  </body>
+</html>

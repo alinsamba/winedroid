@@ -1,0 +1,352 @@
+:root {
+  color-scheme: light;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #efefec;
+  color: #f5f5f2;
+  font-synthesis: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #efefec;
+}
+
+.stage {
+  display: grid;
+  min-height: 100vh;
+  min-height: 100svh;
+  padding: 24px;
+  place-items: center;
+}
+
+.phone-shell {
+  --phone-height-limit-vh: 46.153846vh;
+  --phone-height-limit-svh: 46.153846svh;
+  --phone-height-adjustment: -12.307692px;
+
+  container-type: inline-size;
+  isolation: isolate;
+  position: relative;
+  width: min(452px, calc(100vw - 64px), calc(var(--phone-height-limit-vh) + var(--phone-height-adjustment)));
+  width: min(452px, calc(100vw - 64px), calc(var(--phone-height-limit-svh) + var(--phone-height-adjustment)));
+  overflow: visible;
+  padding: 24px 16px;
+  border: 0;
+  border-radius: 54px;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.34), transparent 2.5%, transparent 97.5%, rgba(255, 255, 255, 0.18)),
+    linear-gradient(145deg, #6d7070 0%, #232526 9%, #0e0f10 48%, #27292a 88%, #747676 100%);
+  box-shadow:
+    0 0 0 1px #080909,
+    0 2px 1px rgba(255, 255, 255, 0.7),
+    0 12px 18px rgba(22, 22, 20, 0.16),
+    0 34px 70px rgba(22, 22, 20, 0.3),
+    0 68px 100px rgba(22, 22, 20, 0.16),
+    inset 1px 0 rgba(255, 255, 255, 0.18),
+    inset -1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.phone-shell::before,
+.phone-shell::after {
+  position: absolute;
+  pointer-events: none;
+  content: "";
+}
+
+.phone-shell::before {
+  z-index: 1;
+  inset: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: inherit;
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 0, 0, 0.72),
+    inset 0 0 10px rgba(0, 0, 0, 0.72);
+}
+
+.phone-shell::after {
+  z-index: 4;
+  inset: 1px;
+  border-radius: inherit;
+  box-shadow:
+    inset 2px 2px 2px rgba(255, 255, 255, 0.12),
+    inset -2px -2px 2px rgba(255, 255, 255, 0.04);
+}
+
+.phone-controls,
+.phone-seams,
+.phone-sensors,
+.phone-home-indicator {
+  pointer-events: none;
+}
+
+.phone-control {
+  position: absolute;
+  z-index: -1;
+  width: clamp(2px, 1.1%, 5px);
+  border-radius: 999px;
+  background: linear-gradient(90deg, #090a0a, #444747 46%, #111212 100%);
+}
+
+.phone-control-action {
+  top: 24.55cqw;
+  left: clamp(-4px, -0.9%, -2px);
+  height: 9.78cqw;
+}
+
+.phone-control-volume-up,
+.phone-control-volume-down {
+  left: clamp(-5px, -1.1%, -2px);
+  height: 15.11cqw;
+}
+
+.phone-control-volume-up {
+  top: 39.82cqw;
+}
+
+.phone-control-volume-down {
+  top: 57.74cqw;
+}
+
+.phone-control-power {
+  top: 43.74cqw;
+  right: clamp(-5px, -1.1%, -2px);
+  height: 22.23cqw;
+  background: linear-gradient(90deg, #151616, #505252 50%, #0a0b0b 100%);
+}
+
+.phone-seam {
+  position: absolute;
+  z-index: 2;
+  width: clamp(1px, 0.44%, 2px);
+  height: 7.83cqw;
+  background: linear-gradient(to bottom, transparent, #080909 25%, #818383 50%, #080909 75%, transparent);
+  opacity: 0.75;
+}
+
+.phone-seam-left-top,
+.phone-seam-left-bottom {
+  left: -1px;
+}
+
+.phone-seam-right-top,
+.phone-seam-right-bottom {
+  right: -1px;
+}
+
+.phone-seam-left-top,
+.phone-seam-right-top {
+  top: 15.11cqw;
+}
+
+.phone-seam-left-bottom,
+.phone-seam-right-bottom {
+  bottom: 15.11cqw;
+}
+
+.phone-sensors {
+  position: absolute;
+  z-index: 5;
+  top: 1.87cqw;
+  left: 50%;
+  display: flex;
+  width: 14.3cqw;
+  height: 2.14cqw;
+  align-items: center;
+  gap: 5%;
+  transform: translateX(-50%);
+}
+
+.phone-earpiece {
+  height: clamp(2px, 52%, 5px);
+  flex: 1;
+  border: 1px solid #303232;
+  border-radius: 999px;
+  background: repeating-linear-gradient(90deg, #080909 0 2px, #1f2121 2px 3px);
+  box-shadow:
+    inset 0 1px 2px #000,
+    0 1px rgba(255, 255, 255, 0.12);
+}
+
+.phone-camera {
+  width: clamp(2px, 10.8%, 7px);
+  aspect-ratio: 1;
+  border: 1px solid #272929;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 34%, #5c6d72 0 7%, #14272d 17%, #050708 52%, #191b1b 72%);
+  box-shadow:
+    inset 0 0 2px #000,
+    0 1px rgba(255, 255, 255, 0.1);
+}
+
+.phone-home-indicator {
+  position: absolute;
+  z-index: 5;
+  bottom: 1.87cqw;
+  left: 50%;
+  width: 28%;
+  height: clamp(2px, 0.5%, 4px);
+  border-radius: 999px;
+  background: #232525;
+  box-shadow:
+    inset 0 1px 1px #080909,
+    0 1px rgba(255, 255, 255, 0.12);
+  transform: translateX(-50%);
+}
+
+.phone-screen {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  overflow: hidden;
+  border: 0;
+  border-radius: 9.1cqw;
+  background: #0b0c0b;
+  box-shadow:
+    0 0 0 2px #030404,
+    0 0 0 3px rgba(255, 255, 255, 0.08),
+    inset 0 0 2px rgba(255, 255, 255, 0.1),
+    inset 0 0 12px rgba(0, 0, 0, 0.72);
+}
+
+.drop-zone,
+.loader,
+#winedroid-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.drop-zone {
+  z-index: 2;
+  display: grid;
+  padding: 32px;
+  place-items: center;
+  background: #0b0c0b;
+  color: #d8d9d5;
+  cursor: pointer;
+  font-size: clamp(15px, 2.2vw, 18px);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  text-align: center;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.drop-zone[data-dragging="true"] {
+  background: #101710;
+  color: #37b957;
+}
+
+.drop-zone:focus-within {
+  box-shadow: inset 0 0 0 3px #2da349;
+}
+
+.drop-zone[aria-disabled="true"] {
+  cursor: default;
+}
+
+#apk-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.loader {
+  z-index: 3;
+  display: flex;
+  padding: 38px;
+  align-items: center;
+  justify-content: center;
+  background: #0b0c0b;
+  flex-direction: column;
+  gap: 34px;
+}
+
+.loader img {
+  display: block;
+  width: min(78%, 320px);
+  height: auto;
+}
+
+.progress-track {
+  width: min(72%, 292px);
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #292b29;
+}
+
+.progress-track:focus-visible {
+  outline: 2px solid #2da349;
+  outline-offset: 5px;
+}
+
+.progress-track span {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: #2da349;
+  transition: width 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+#winedroid-canvas {
+  z-index: 1;
+  display: block;
+  border: 0;
+  background: #000;
+  opacity: 0;
+  touch-action: none;
+  transition: opacity 160ms ease;
+}
+
+.phone-screen[data-state="running"] #winedroid-canvas {
+  opacity: 1;
+}
+
+#winedroid-canvas:focus-visible {
+  outline: 3px solid #2da349;
+  outline-offset: -3px;
+}
+
+.phone-glass-reflection {
+  position: absolute;
+  z-index: 6;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background:
+    linear-gradient(112deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.025) 13%, transparent 24%, transparent 76%, rgba(255, 255, 255, 0.035) 100%),
+    radial-gradient(circle at 12% 5%, rgba(255, 255, 255, 0.12), transparent 19%);
+  mix-blend-mode: screen;
+  opacity: 0.55;
+}
+
+.phone-screen[data-state="running"] .phone-glass-reflection {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drop-zone,
+  .progress-track span,
+  #winedroid-canvas {
+    transition: none;
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "opennotes_wall_ms": {
+    "median_ms": 3056,
+    "samples_ms": [
+      3050,
+      3062,
+      3059,
+      3056,
+      3043
+    ]
+  },
+  "opennotes_editor_open_ms": {
+    "median_ms": 597,
+    "samples_ms": [
+      597,
+      586,
+      648,
+      579,
+      604
+    ]
+  },
+  "opennotes_keystroke_ms": {
+    "median_ms": 169,
+    "samples_ms": [
+      169,
+      175,
+      159,
+      164,
+      182
+    ]
+  },
+  "medtimer_wall_ms": {
+    "median_ms": 3050,
+    "samples_ms": [
+      3034,
+      3050,
+      3062,
+      3041,
+      3064
+    ]
+  }
+}

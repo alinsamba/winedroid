@@ -1,0 +1,7 @@
+/target/
+/web/dist/
+__pycache__/
+**/*.rs.bk
+benchmarks/results.json
+benchmarks/open-notes/results.latest.json
+benchmarks/open-notes/artifacts/

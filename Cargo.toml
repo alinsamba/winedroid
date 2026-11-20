@@ -1,0 +1,40 @@
+[package]
+name = "winedroid"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+
+[dependencies]
+regex = "1"
+libc = "0.2"
+rusqlite = { version = "0.32", features = ["bundled", "hooks"] }
+rustix = { version = "1.1", features = ["fs"] }
+serde_json = "1"
+skia-safe = "0.97.2"
+smallvec = "1"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+cranelift-codegen = { version = "0.125", optional = true }
+cranelift-frontend = { version = "0.125", optional = true }
+cranelift-jit = { version = "0.125", optional = true }
+cranelift-module = { version = "0.125", optional = true }
+cranelift-native = { version = "0.125", optional = true }
+softbuffer = "0.4"
+winit = "0.30"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[features]
+default = ["jit"]
+jit = [
+    "dep:cranelift-jit",
+    "dep:cranelift-module",
+    "dep:cranelift-codegen",
+    "dep:cranelift-frontend",
+    "dep:cranelift-native",
+]

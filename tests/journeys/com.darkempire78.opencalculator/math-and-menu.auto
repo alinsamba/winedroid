@@ -1,0 +1,27 @@
+0    waittext "AC" 15000
+500  dump ui home.xml
+0    screenshot home.png
+300  tap text "1"
+300  tap text "+"
+300  tap text "2"
+300  tap text "×"
+300  tap text "3"
+300  tap text "÷"
+300  tap text "4"
+300  tap text "="
+0    waitidle 5000
+0    assert text "2.5"
+500  dump ui result.xml
+0    screenshot result.png
+300  tap id menuButton
+300  waittext "Support Us" 5000
+500  dump ui menu.xml
+0    screenshot menu.png
+300  tap text "Support Us"
+500  waittext "Close" 8000
+500  dump ui support.xml
+0    screenshot support.png
+300  tap text "Close"
+500  assert notext "Close"
+0    assert text "AC"
+500  dump ui closed.xml

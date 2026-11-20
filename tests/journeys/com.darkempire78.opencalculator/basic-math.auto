@@ -1,0 +1,11 @@
+0    waittext "AC" 15000
+500  dump ui home.xml
+0    screenshot home.png
+300  tap text "7"
+300  tap text "+"
+300  tap text "8"
+300  tap text "="
+0    waitidle 5000
+0    assert text "15"
+500  dump ui result.xml
+0    screenshot result.png

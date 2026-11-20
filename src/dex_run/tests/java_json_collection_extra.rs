@@ -1,0 +1,451 @@
+use super::super::*;
+use super::helpers::*;
+
+#[test]
+fn builtin_thread_local_stores_value_per_instance() {
+    let program = DexProgram::new(Vec::new());
+    let constructor = DexMethodId {
+        class_descriptor: "Ljava/lang/ThreadLocal;".to_owned(),
+        name: "<init>".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "V".to_owned(),
+            return_type: "V".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+    let get = DexMethodId {
+        class_descriptor: "Ljava/lang/ThreadLocal;".to_owned(),
+        name: "get".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "L".to_owned(),
+            return_type: "Ljava/lang/Object;".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+    let set = DexMethodId {
+        class_descriptor: "Ljava/lang/ThreadLocal;".to_owned(),
+        name: "set".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "VL".to_owned(),
+            return_type: "V".to_owned(),
+            parameters: vec!["Ljava/lang/Object;".to_owned()],
+        },
+    };
+    let remove = DexMethodId {
+        class_descriptor: "Ljava/lang/ThreadLocal;".to_owned(),
+        name: "remove".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "V".to_owned(),
+            return_type: "V".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+    let thread_local = DexValue::Reference(std::rc::Rc::from("Ljava/lang/ThreadLocal;:formatter"));
+    let get_invocation = test_invocation(vec![thread_local.clone()]);
+    let value = DexValue::Reference(std::rc::Rc::from("Ljava/lang/Object;:value"));
+    let set_invocation = test_invocation(vec![thread_local.clone(), value.clone()]);
+
+    assert_eq!(
+        program.invoke_builtin_method(&constructor, None),
+        Some(DexExecutionResult::Void)
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&get, Some(&get_invocation)),
+        Some(DexExecutionResult::Value(DexValue::Null))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&set, Some(&set_invocation)),
+        Some(DexExecutionResult::Void)
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&get, Some(&get_invocation)),
+        Some(DexExecutionResult::Value(value))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&remove, Some(&get_invocation)),
+        Some(DexExecutionResult::Void)
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&get, Some(&get_invocation)),
+        Some(DexExecutionResult::Value(DexValue::Null))
+    );
+}
+
+#[test]
+fn builtin_json_array_serializes_collection_with_boxed_numbers() {
+    let program = DexProgram::new(Vec::new());
+    let list = DexValue::Reference(std::rc::Rc::from("Ljava/util/ArrayList;:codes"));
+    let array = DexValue::Reference(std::rc::Rc::from("Lorg/json/JSONArray;:1"));
+    let list_add = DexMethodId {
+        class_descriptor: "Ljava/util/List;".to_owned(),
+        name: "add".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "ZL".to_owned(),
+            return_type: "Z".to_owned(),
+            parameters: vec!["Ljava/lang/Object;".to_owned()],
+        },
+    };
+    let init = DexMethodId {
+        class_descriptor: "Lorg/json/JSONArray;".to_owned(),
+        name: "<init>".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "VL".to_owned(),
+            return_type: "V".to_owned(),
+            parameters: vec!["Ljava/util/Collection;".to_owned()],
+        },
+    };
+    let to_string = DexMethodId {
+        class_descriptor: "Lorg/json/JSONArray;".to_owned(),
+        name: "toString".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "L".to_owned(),
+            return_type: "Ljava/lang/String;".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+
+    for value in ["EUR", "GBP"] {
+        program.invoke_builtin_method(
+            &list_add,
+            Some(&test_invocation(vec![
+                list.clone(),
+                DexValue::String(std::rc::Rc::from(value.to_owned())),
+            ])),
+        );
+    }
+    program.invoke_builtin_method(
+        &list_add,
+        Some(&test_invocation(vec![
+            list.clone(),
+            DexValue::Reference(std::rc::Rc::from("Ljava/lang/Integer;:42")),
+        ])),
+    );
+
+    assert_eq!(
+        program.invoke_builtin_method(&init, Some(&test_invocation(vec![array.clone(), list]))),
+        Some(DexExecutionResult::Void)
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&to_string, Some(&test_invocation(vec![array]))),
+        Some(DexExecutionResult::Value(DexValue::String(
+            std::rc::Rc::from("[\"EUR\",\"GBP\",42]")
+        )))
+    );
+}
+
+#[test]
+fn builtin_json_object_constructor_returns_void() {
+    let program = DexProgram::new(Vec::new());
+    let method = DexMethodId {
+        class_descriptor: "Lorg/json/JSONObject;".to_owned(),
+        name: "<init>".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "V".to_owned(),
+            return_type: "V".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+
+    assert_eq!(
+        program.invoke_builtin_method(&method, None),
+        Some(DexExecutionResult::Void)
+    );
+}
+
+#[test]
+fn builtin_json_object_put_int_stores_value_and_returns_object() {
+    let program = DexProgram::new(Vec::new());
+    let put_int = DexMethodId {
+        class_descriptor: "Lorg/json/JSONObject;".to_owned(),
+        name: "put".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "LLI".to_owned(),
+            return_type: "Lorg/json/JSONObject;".to_owned(),
+            parameters: vec!["Ljava/lang/String;".to_owned(), "I".to_owned()],
+        },
+    };
+    let put_object = DexMethodId {
+        class_descriptor: "Lorg/json/JSONObject;".to_owned(),
+        name: "put".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "LLL".to_owned(),
+            return_type: "Lorg/json/JSONObject;".to_owned(),
+            parameters: vec![
+                "Ljava/lang/String;".to_owned(),
+                "Ljava/lang/Object;".to_owned(),
+            ],
+        },
+    };
+    let put_long = DexMethodId {
+        class_descriptor: "Lorg/json/JSONObject;".to_owned(),
+        name: "put".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "LLJ".to_owned(),
+            return_type: "Lorg/json/JSONObject;".to_owned(),
+            parameters: vec!["Ljava/lang/String;".to_owned(), "J".to_owned()],
+        },
+    };
+    let length = DexMethodId {
+        class_descriptor: "Lorg/json/JSONObject;".to_owned(),
+        name: "length".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "I".to_owned(),
+            return_type: "I".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+    let is_null = DexMethodId {
+        class_descriptor: "Lorg/json/JSONObject;".to_owned(),
+        name: "isNull".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "ZL".to_owned(),
+            return_type: "Z".to_owned(),
+            parameters: vec!["Ljava/lang/String;".to_owned()],
+        },
+    };
+    let to_string = DexMethodId {
+        class_descriptor: "Lorg/json/JSONObject;".to_owned(),
+        name: "toString".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "L".to_owned(),
+            return_type: "Ljava/lang/String;".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+    let object = DexValue::Reference(std::rc::Rc::from("json"));
+    let put_int_invocation = test_invocation(vec![
+        object.clone(),
+        DexValue::String(std::rc::Rc::from("elapsed")),
+        DexValue::Int(7),
+    ]);
+    let put_object_invocation = test_invocation(vec![
+        object.clone(),
+        DexValue::String(std::rc::Rc::from("country")),
+        DexValue::String(std::rc::Rc::from("US")),
+    ]);
+    let put_long_invocation = test_invocation(vec![
+        object.clone(),
+        DexValue::String(std::rc::Rc::from("duration")),
+        DexValue::Long(42),
+        DexValue::Long(42),
+    ]);
+    let length_invocation = test_invocation(vec![DexValue::Reference(std::rc::Rc::from("json"))]);
+    let present_invocation = test_invocation(vec![
+        DexValue::Reference(std::rc::Rc::from("json")),
+        DexValue::String(std::rc::Rc::from("country")),
+    ]);
+    let missing_invocation = test_invocation(vec![
+        DexValue::Reference(std::rc::Rc::from("json")),
+        DexValue::String(std::rc::Rc::from("missing")),
+    ]);
+
+    assert_eq!(
+        program.invoke_builtin_method(&put_int, Some(&put_int_invocation)),
+        Some(DexExecutionResult::Value(object.clone()))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&put_object, Some(&put_object_invocation)),
+        Some(DexExecutionResult::Value(object))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&put_long, Some(&put_long_invocation)),
+        Some(DexExecutionResult::Value(DexValue::Reference(
+            std::rc::Rc::from("json")
+        )))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&length, Some(&length_invocation)),
+        Some(DexExecutionResult::Int(3))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&is_null, Some(&present_invocation)),
+        Some(DexExecutionResult::Int(0))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&is_null, Some(&missing_invocation)),
+        Some(DexExecutionResult::Int(1))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&to_string, Some(&length_invocation)),
+        Some(DexExecutionResult::Value(DexValue::String(
+            std::rc::Rc::from("{\"country\":\"US\",\"duration\":42,\"elapsed\":7}")
+        )))
+    );
+    assert_eq!(
+        program
+            .runtime
+            .borrow()
+            .json_entries
+            .get(&("reference:json".to_owned(), "elapsed".to_owned())),
+        Some(&DexValue::Int(7))
+    );
+    assert_eq!(
+        program
+            .runtime
+            .borrow()
+            .json_entries
+            .get(&("reference:json".to_owned(), "country".to_owned())),
+        Some(&DexValue::String(std::rc::Rc::from("US")))
+    );
+    assert_eq!(
+        program
+            .runtime
+            .borrow()
+            .json_entries
+            .get(&("reference:json".to_owned(), "duration".to_owned())),
+        Some(&DexValue::Long(42))
+    );
+}
+
+#[test]
+fn builtin_json_object_to_string_serializes_nested_json_objects() {
+    let program = DexProgram::new(Vec::new());
+    let put_int = DexMethodId {
+        class_descriptor: "Lorg/json/JSONObject;".to_owned(),
+        name: "put".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "LLI".to_owned(),
+            return_type: "Lorg/json/JSONObject;".to_owned(),
+            parameters: vec!["Ljava/lang/String;".to_owned(), "I".to_owned()],
+        },
+    };
+    let put_object = DexMethodId {
+        class_descriptor: "Lorg/json/JSONObject;".to_owned(),
+        name: "put".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "LLL".to_owned(),
+            return_type: "Lorg/json/JSONObject;".to_owned(),
+            parameters: vec![
+                "Ljava/lang/String;".to_owned(),
+                "Ljava/lang/Object;".to_owned(),
+            ],
+        },
+    };
+    let to_string = DexMethodId {
+        class_descriptor: "Lorg/json/JSONObject;".to_owned(),
+        name: "toString".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "L".to_owned(),
+            return_type: "Ljava/lang/String;".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+    let parent = DexValue::Object(DexObjectRef {
+        id: 1,
+        class_descriptor: std::rc::Rc::from("Lorg/json/JSONObject;"),
+    });
+    let child = DexValue::Object(DexObjectRef {
+        id: 2,
+        class_descriptor: std::rc::Rc::from("Lorg/json/JSONObject;"),
+    });
+    let child_put_invocation = test_invocation(vec![
+        child.clone(),
+        DexValue::String(std::rc::Rc::from("count")),
+        DexValue::Int(3),
+    ]);
+    let parent_put_invocation = test_invocation(vec![
+        parent.clone(),
+        DexValue::String(std::rc::Rc::from("child")),
+        child,
+    ]);
+    let to_string_invocation = test_invocation(vec![parent]);
+
+    assert_eq!(
+        program.invoke_builtin_method(&put_int, Some(&child_put_invocation)),
+        Some(DexExecutionResult::Value(DexValue::Object(DexObjectRef {
+            id: 2,
+            class_descriptor: std::rc::Rc::from("Lorg/json/JSONObject;")
+        })))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&put_object, Some(&parent_put_invocation)),
+        Some(DexExecutionResult::Value(DexValue::Object(DexObjectRef {
+            id: 1,
+            class_descriptor: std::rc::Rc::from("Lorg/json/JSONObject;")
+        })))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&to_string, Some(&to_string_invocation)),
+        Some(DexExecutionResult::Value(DexValue::String(
+            std::rc::Rc::from("{\"child\":{\"count\":3}}")
+        )))
+    );
+}
+
+#[test]
+fn builtin_json_array_parses_string_and_reads_back_elements() {
+    let program = DexProgram::new(Vec::new());
+    let array = DexValue::Reference(std::rc::Rc::from("Lorg/json/JSONArray;:names"));
+    let init_string = DexMethodId {
+        class_descriptor: "Lorg/json/JSONArray;".to_owned(),
+        name: "<init>".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "VL".to_owned(),
+            return_type: "V".to_owned(),
+            parameters: vec!["Ljava/lang/String;".to_owned()],
+        },
+    };
+    let length = DexMethodId {
+        class_descriptor: "Lorg/json/JSONArray;".to_owned(),
+        name: "length".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "I".to_owned(),
+            return_type: "I".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+    let get_string = DexMethodId {
+        class_descriptor: "Lorg/json/JSONArray;".to_owned(),
+        name: "getString".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "LI".to_owned(),
+            return_type: "Ljava/lang/String;".to_owned(),
+            parameters: vec!["I".to_owned()],
+        },
+    };
+    let is_null = DexMethodId {
+        class_descriptor: "Lorg/json/JSONArray;".to_owned(),
+        name: "isNull".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "ZI".to_owned(),
+            return_type: "Z".to_owned(),
+            parameters: vec!["I".to_owned()],
+        },
+    };
+
+    program.invoke_builtin_method(
+        &init_string,
+        Some(&test_invocation(vec![
+            array.clone(),
+            DexValue::String(std::rc::Rc::from(r#"["GBP","CAD","USD","EUR"]"#.to_owned())),
+        ])),
+    );
+
+    assert_eq!(
+        program.invoke_builtin_method(&length, Some(&test_invocation(vec![array.clone()]))),
+        Some(DexExecutionResult::Int(4))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(
+            &get_string,
+            Some(&test_invocation(vec![array.clone(), DexValue::Int(1)]))
+        ),
+        Some(DexExecutionResult::Value(DexValue::String(
+            std::rc::Rc::from("CAD")
+        )))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(
+            &is_null,
+            Some(&test_invocation(vec![array.clone(), DexValue::Int(2)]))
+        ),
+        Some(DexExecutionResult::Int(0))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(
+            &is_null,
+            Some(&test_invocation(vec![array, DexValue::Int(9)]))
+        ),
+        Some(DexExecutionResult::Int(1))
+    );
+}

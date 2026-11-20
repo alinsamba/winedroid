@@ -1,0 +1,1867 @@
+use super::*;
+
+impl DexProgram {
+    pub(in crate::dex_run) fn initialize_atomic_boolean(
+        &self,
+        invocation: &DexInvocation,
+        initial_value: i32,
+    ) -> Option<()> {
+        let object = invocation.arguments.first()?;
+        let object_key = map_identity_key(object);
+
+        self.runtime
+            .borrow_mut()
+            .atomic_boolean_values
+            .insert(object_key, normalize_atomic_boolean(initial_value));
+
+        Some(())
+    }
+
+    pub(in crate::dex_run) fn atomic_boolean_get(&self, invocation: &DexInvocation) -> Option<i32> {
+        if invocation.arguments.len() != 1 {
+            return None;
+        }
+
+        let object_key = map_identity_key(&invocation.arguments[0]);
+
+        Some(
+            self.runtime
+                .borrow()
+                .atomic_boolean_values
+                .get(&object_key)
+                .copied()
+                .unwrap_or(0),
+        )
+    }
+
+    pub(in crate::dex_run) fn atomic_boolean_set(&self, invocation: &DexInvocation) -> Option<()> {
+        if invocation.arguments.len() != 2 {
+            return None;
+        }
+
+        let object_key = map_identity_key(&invocation.arguments[0]);
+        let DexValue::Int(value) = invocation.arguments[1] else {
+            return None;
+        };
+
+        self.runtime
+            .borrow_mut()
+            .atomic_boolean_values
+            .insert(object_key, normalize_atomic_boolean(value));
+
+        Some(())
+    }
+
+    pub(in crate::dex_run) fn atomic_boolean_get_and_set(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<i32> {
+        if invocation.arguments.len() != 2 {
+            return None;
+        }
+
+        let object_key = map_identity_key(&invocation.arguments[0]);
+        let DexValue::Int(update) = invocation.arguments[1] else {
+            return None;
+        };
+        let mut runtime = self.runtime.borrow_mut();
+        let previous = runtime
+            .atomic_boolean_values
+            .insert(object_key, normalize_atomic_boolean(update))
+            .unwrap_or(0);
+
+        Some(previous)
+    }
+
+    pub(in crate::dex_run) fn atomic_boolean_compare_and_set(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<i32> {
+        if invocation.arguments.len() != 3 {
+            return None;
+        }
+
+        let object_key = map_identity_key(&invocation.arguments[0]);
+        let DexValue::Int(expected) = invocation.arguments[1] else {
+            return None;
+        };
+        let DexValue::Int(update) = invocation.arguments[2] else {
+            return None;
+        };
+        let expected = normalize_atomic_boolean(expected);
+        let update = normalize_atomic_boolean(update);
+        let mut runtime = self.runtime.borrow_mut();
+        let current = runtime
+            .atomic_boolean_values
+            .get(&object_key)
+            .copied()
+            .unwrap_or(0);
+
+        if current != expected {
+            return Some(0);
+        }
+
+        runtime.atomic_boolean_values.insert(object_key, update);
+        Some(1)
+    }
+
+    pub(in crate::dex_run) fn initialize_atomic_integer(
+        &self,
+        invocation: &DexInvocation,
+        initial_value: i32,
+    ) -> Option<()> {
+        let object = invocation.arguments.first()?;
+        let object_key = map_identity_key(object);
+
+        self.runtime
+            .borrow_mut()
+            .atomic_integer_values
+            .insert(object_key, initial_value);
+
+        Some(())
+    }
+
+    pub(in crate::dex_run) fn atomic_integer_get(&self, invocation: &DexInvocation) -> Option<i32> {
+        if invocation.arguments.len() != 1 {
+            return None;
+        }
+
+        let object_key = map_identity_key(&invocation.arguments[0]);
+
+        Some(
+            self.runtime
+                .borrow()
+                .atomic_integer_values
+                .get(&object_key)
+                .copied()
+                .unwrap_or(0),
+        )
+    }
+
+    pub(in crate::dex_run) fn atomic_integer_set(&self, invocation: &DexInvocation) -> Option<()> {
+        if invocation.arguments.len() != 2 {
+            return None;
+        }
+
+        let object_key = map_identity_key(&invocation.arguments[0]);
+        let DexValue::Int(value) = invocation.arguments[1] else {
+            return None;
+        };
+
+        self.runtime
+            .borrow_mut()
+            .atomic_integer_values
+            .insert(object_key, value);
+
+        Some(())
+    }
+
+    pub(in crate::dex_run) fn atomic_integer_add(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<(i32, i32)> {
+        if invocation.arguments.len() != 2 {
+            return None;
+        }
+
+        let object_key = map_identity_key(&invocation.arguments[0]);
+        let DexValue::Int(delta) = invocation.arguments[1] else {
+            return None;
+        };
+        let mut runtime = self.runtime.borrow_mut();
+        let value = runtime.atomic_integer_values.entry(object_key).or_insert(0);
+        let previous = *value;
+
+        *value = (*value).checked_add(delta)?;
+
+        Some((previous, *value))
+    }
+
+    pub(in crate::dex_run) fn atomic_integer_compare_and_set(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<i32> {
+        if invocation.arguments.len() != 3 {
+            return None;
+        }
+
+        let object_key = map_identity_key(&invocation.arguments[0]);
+        let DexValue::Int(expected) = invocation.arguments[1] else {
+            return None;
+        };
+        let DexValue::Int(update) = invocation.arguments[2] else {
+            return None;
+        };
+        let mut runtime = self.runtime.borrow_mut();
+        let value = runtime.atomic_integer_values.entry(object_key).or_insert(0);
+
+        if *value != expected {
+            return Some(0);
+        }
+
+        *value = update;
+        Some(1)
+    }
+
+    pub(in crate::dex_run) fn increment_atomic_integer(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<i32> {
+        let object = invocation.arguments.first()?;
+        let object_key = map_identity_key(object);
+        let mut runtime = self.runtime.borrow_mut();
+        let value = runtime.atomic_integer_values.entry(object_key).or_insert(0);
+
+        *value = (*value).checked_add(1)?;
+
+        Some(*value)
+    }
+
+    pub(in crate::dex_run) fn get_and_increment_atomic_integer(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<i32> {
+        let object = invocation.arguments.first()?;
+        let object_key = map_identity_key(object);
+        let mut runtime = self.runtime.borrow_mut();
+        let value = runtime.atomic_integer_values.entry(object_key).or_insert(0);
+        let previous = *value;
+
+        *value = (*value).checked_add(1)?;
+
+        Some(previous)
+    }
+
+    pub(in crate::dex_run) fn decrement_atomic_integer(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<i32> {
+        let object = invocation.arguments.first()?;
+        let object_key = map_identity_key(object);
+        let mut runtime = self.runtime.borrow_mut();
+        let value = runtime.atomic_integer_values.entry(object_key).or_insert(0);
+
+        *value = (*value).checked_sub(1)?;
+
+        Some(*value)
+    }
+
+    pub(in crate::dex_run) fn initialize_atomic_reference(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<()> {
+        if invocation.arguments.len() != 2 {
+            return None;
+        }
+
+        let object_key = atomic_reference_key(&invocation.arguments[0])?;
+        let value = atomic_reference_value(&invocation.arguments[1])?;
+
+        self.runtime
+            .borrow_mut()
+            .atomic_reference_values
+            .insert(object_key, value);
+
+        Some(())
+    }
+
+    pub(in crate::dex_run) fn initialize_empty_atomic_reference(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<()> {
+        if invocation.arguments.len() != 1 {
+            return None;
+        }
+
+        let object_key = atomic_reference_key(&invocation.arguments[0])?;
+
+        self.runtime
+            .borrow_mut()
+            .atomic_reference_values
+            .insert(object_key, DexValue::Null);
+
+        Some(())
+    }
+
+    pub(in crate::dex_run) fn atomic_reference_get(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<DexValue> {
+        if invocation.arguments.len() != 1 {
+            return None;
+        }
+
+        let object_key = atomic_reference_key(&invocation.arguments[0])?;
+
+        Some(
+            self.runtime
+                .borrow()
+                .atomic_reference_values
+                .get(&object_key)
+                .cloned()
+                .unwrap_or(DexValue::Null),
+        )
+    }
+
+    pub(in crate::dex_run) fn atomic_reference_set(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<()> {
+        if invocation.arguments.len() != 2 {
+            return None;
+        }
+
+        let object_key = atomic_reference_key(&invocation.arguments[0])?;
+
+        let value = atomic_reference_value(&invocation.arguments[1])?;
+
+        self.runtime
+            .borrow_mut()
+            .atomic_reference_values
+            .insert(object_key, value);
+
+        Some(())
+    }
+
+    pub(in crate::dex_run) fn atomic_reference_get_and_set(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<DexValue> {
+        if invocation.arguments.len() != 2 {
+            return None;
+        }
+
+        let object_key = atomic_reference_key(&invocation.arguments[0])?;
+        let update = atomic_reference_value(&invocation.arguments[1])?;
+        let mut runtime = self.runtime.borrow_mut();
+        let previous = runtime
+            .atomic_reference_values
+            .insert(object_key, update)
+            .unwrap_or(DexValue::Null);
+
+        Some(previous)
+    }
+
+    pub(in crate::dex_run) fn atomic_reference_compare_and_set(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<i32> {
+        if invocation.arguments.len() != 3 {
+            return None;
+        }
+
+        let object_key = atomic_reference_key(&invocation.arguments[0])?;
+        let expected = atomic_reference_value(&invocation.arguments[1])?;
+        let update = atomic_reference_value(&invocation.arguments[2])?;
+        let mut runtime = self.runtime.borrow_mut();
+        let current = runtime
+            .atomic_reference_values
+            .get(&object_key)
+            .cloned()
+            .unwrap_or(DexValue::Null);
+
+        if current != expected {
+            return Some(0);
+        }
+
+        runtime.atomic_reference_values.insert(object_key, update);
+        Some(1)
+    }
+
+    pub(in crate::dex_run) fn initialize_atomic_reference_array(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<()> {
+        if invocation.arguments.len() != 2 {
+            return None;
+        }
+
+        let size = usize::try_from(primitive_int_argument(&invocation.arguments[1])?).ok()?;
+        let array_key = atomic_reference_key(&invocation.arguments[0])?;
+
+        self.runtime
+            .borrow_mut()
+            .array_entries
+            .insert(array_key, vec![DexValue::Null; size]);
+
+        Some(())
+    }
+
+    pub(in crate::dex_run) fn atomic_reference_array_length(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<i32> {
+        if invocation.arguments.len() != 1 {
+            return None;
+        }
+
+        self.array_length(&invocation.arguments[0])
+    }
+
+    pub(in crate::dex_run) fn atomic_reference_array_get(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<DexValue> {
+        if invocation.arguments.len() != 2 {
+            return None;
+        }
+
+        let index = primitive_int_argument(&invocation.arguments[1])?;
+
+        self.read_array_value(&invocation.arguments[0], index)
+    }
+
+    pub(in crate::dex_run) fn atomic_reference_array_set(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<()> {
+        if invocation.arguments.len() != 3 {
+            return None;
+        }
+
+        let index = primitive_int_argument(&invocation.arguments[1])?;
+        let value = atomic_reference_value(&invocation.arguments[2])?;
+
+        self.write_array_value(&invocation.arguments[0], index, value)
+    }
+
+    pub(in crate::dex_run) fn atomic_reference_array_get_and_set(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<DexValue> {
+        if invocation.arguments.len() != 3 {
+            return None;
+        }
+
+        let array_key = atomic_reference_key(&invocation.arguments[0])?;
+        let index = usize::try_from(primitive_int_argument(&invocation.arguments[1])?).ok()?;
+        let value = atomic_reference_value(&invocation.arguments[2])?;
+        let mut runtime = self.runtime.borrow_mut();
+        let slot = runtime.array_entries.get_mut(&array_key)?.get_mut(index)?;
+        let previous = slot.clone();
+        *slot = value;
+
+        Some(previous)
+    }
+
+    pub(in crate::dex_run) fn atomic_reference_array_compare_and_set(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<i32> {
+        if invocation.arguments.len() != 4 {
+            return None;
+        }
+
+        let array_key = atomic_reference_key(&invocation.arguments[0])?;
+        let index = usize::try_from(primitive_int_argument(&invocation.arguments[1])?).ok()?;
+        let expected = atomic_reference_value(&invocation.arguments[2])?;
+        let update = atomic_reference_value(&invocation.arguments[3])?;
+        let mut runtime = self.runtime.borrow_mut();
+        let slot = runtime.array_entries.get_mut(&array_key)?.get_mut(index)?;
+
+        if *slot != expected {
+            return Some(0);
+        }
+
+        *slot = update;
+        Some(1)
+    }
+
+    pub(in crate::dex_run) fn atomic_reference_field_updater_get(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<DexValue> {
+        if invocation.arguments.len() != 2 {
+            return None;
+        }
+
+        let (target_descriptor, value_descriptor, field_name) =
+            atomic_reference_field_updater_parts(&invocation.arguments[0])?;
+        let target = &invocation.arguments[1];
+        let class_descriptor = value_class_descriptor(target)?;
+        if !self.descriptor_matches_type(class_descriptor, &target_descriptor) {
+            return Some(DexValue::Null);
+        }
+
+        let field = DexFieldId {
+            class_descriptor: target_descriptor,
+            type_descriptor: value_descriptor,
+            name: field_name,
+        };
+
+        Some(
+            self.read_stored_instance_field(target, &field)
+                .unwrap_or(DexValue::Null),
+        )
+    }
+
+    pub(in crate::dex_run) fn atomic_reference_field_updater_set(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<()> {
+        if invocation.arguments.len() != 3 {
+            return None;
+        }
+
+        let (target_descriptor, value_descriptor, field_name) =
+            atomic_reference_field_updater_parts(&invocation.arguments[0])?;
+        let target = &invocation.arguments[1];
+        let class_descriptor = value_class_descriptor(target)?;
+        if !self.descriptor_matches_type(class_descriptor, &target_descriptor) {
+            return Some(());
+        }
+        let value = atomic_reference_value(&invocation.arguments[2])?;
+
+        let field = DexFieldId {
+            class_descriptor: target_descriptor,
+            type_descriptor: value_descriptor,
+            name: field_name,
+        };
+
+        self.write_stored_instance_field(target, &field, value)
+            .then_some(())
+    }
+
+    pub(in crate::dex_run) fn atomic_reference_field_updater_get_and_set(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<DexValue> {
+        // cite: libcore AtomicReferenceFieldUpdater.java#getAndSet
+        if invocation.arguments.len() != 3 {
+            return None;
+        }
+
+        let (target_descriptor, value_descriptor, field_name) =
+            atomic_reference_field_updater_parts(&invocation.arguments[0])?;
+        let target = &invocation.arguments[1];
+        let class_descriptor = value_class_descriptor(target)?;
+        if !self.descriptor_matches_type(class_descriptor, &target_descriptor) {
+            return Some(DexValue::Null);
+        }
+        let value = atomic_reference_value(&invocation.arguments[2])?;
+        let field = DexFieldId {
+            class_descriptor: target_descriptor,
+            type_descriptor: value_descriptor,
+            name: field_name,
+        };
+        let previous = self
+            .read_stored_instance_field(target, &field)
+            .or_else(|| default_field_value(&field))?;
+        self.write_stored_instance_field(target, &field, value)
+            .then_some(previous)
+    }
+
+    pub(in crate::dex_run) fn atomic_reference_field_updater_compare_and_set(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<i32> {
+        if invocation.arguments.len() != 4 {
+            return None;
+        }
+
+        let (target_descriptor, value_descriptor, field_name) =
+            atomic_reference_field_updater_parts(&invocation.arguments[0])?;
+        let target = &invocation.arguments[1];
+        let class_descriptor = value_class_descriptor(target)?;
+        if !self.descriptor_matches_type(class_descriptor, &target_descriptor) {
+            return Some(0);
+        }
+        let expected = atomic_reference_value(&invocation.arguments[2])?;
+        let update = atomic_reference_value(&invocation.arguments[3])?;
+
+        let field = DexFieldId {
+            class_descriptor: target_descriptor,
+            type_descriptor: value_descriptor,
+            name: field_name,
+        };
+        let current = self
+            .read_stored_instance_field(target, &field)
+            .or_else(|| default_field_value(&field))?;
+
+        if current != expected {
+            return Some(0);
+        }
+
+        self.write_stored_instance_field(target, &field, update)
+            .then_some(1)
+    }
+
+    pub(in crate::dex_run) fn atomic_integer_field_updater_get(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<i32> {
+        if invocation.arguments.len() != 2 {
+            return None;
+        }
+
+        let (target_descriptor, field_name) =
+            atomic_integer_field_updater_parts(&invocation.arguments[0])?;
+        let target = &invocation.arguments[1];
+        let class_descriptor = value_class_descriptor(target)?;
+        if !self.descriptor_matches_type(class_descriptor, &target_descriptor) {
+            return Some(0);
+        }
+
+        let field = DexFieldId {
+            class_descriptor: target_descriptor,
+            type_descriptor: "I".to_owned(),
+            name: field_name,
+        };
+
+        match self
+            .read_stored_instance_field(target, &field)
+            .or_else(|| default_field_value(&field))
+        {
+            Some(DexValue::Int(value)) => Some(value),
+            _ => None,
+        }
+    }
+
+    pub(in crate::dex_run) fn atomic_integer_field_updater_set(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<()> {
+        if invocation.arguments.len() != 3 {
+            return None;
+        }
+
+        let (target_descriptor, field_name) =
+            atomic_integer_field_updater_parts(&invocation.arguments[0])?;
+        let target = &invocation.arguments[1];
+        let class_descriptor = value_class_descriptor(target)?;
+        if !self.descriptor_matches_type(class_descriptor, &target_descriptor) {
+            return Some(());
+        }
+        let DexValue::Int(value) = invocation.arguments[2] else {
+            return None;
+        };
+
+        let field = DexFieldId {
+            class_descriptor: target_descriptor,
+            type_descriptor: "I".to_owned(),
+            name: field_name,
+        };
+
+        self.write_stored_instance_field(target, &field, DexValue::Int(value))
+            .then_some(())
+    }
+
+    pub(in crate::dex_run) fn atomic_integer_field_updater_compare_and_set(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<i32> {
+        if invocation.arguments.len() != 4 {
+            return None;
+        }
+
+        let (target_descriptor, field_name) =
+            atomic_integer_field_updater_parts(&invocation.arguments[0])?;
+        let target = &invocation.arguments[1];
+        let class_descriptor = value_class_descriptor(target)?;
+        if !self.descriptor_matches_type(class_descriptor, &target_descriptor) {
+            return Some(0);
+        }
+        let DexValue::Int(expected) = invocation.arguments[2] else {
+            return None;
+        };
+        let DexValue::Int(update) = invocation.arguments[3] else {
+            return None;
+        };
+
+        let field = DexFieldId {
+            class_descriptor: target_descriptor,
+            type_descriptor: "I".to_owned(),
+            name: field_name,
+        };
+        let current = match self
+            .read_stored_instance_field(target, &field)
+            .or_else(|| default_field_value(&field))
+        {
+            Some(DexValue::Int(value)) => value,
+            _ => return None,
+        };
+
+        if current != expected {
+            return Some(0);
+        }
+
+        self.write_stored_instance_field(target, &field, DexValue::Int(update))
+            .then_some(1)
+    }
+
+    pub(in crate::dex_run) fn atomic_integer_field_updater_increment_and_get(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<i32> {
+        if invocation.arguments.len() != 2 {
+            return None;
+        }
+
+        let (_current, next) = self.atomic_integer_field_updater_add(invocation, 1)?;
+
+        Some(next)
+    }
+
+    pub(in crate::dex_run) fn atomic_integer_field_updater_get_and_increment(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<i32> {
+        if invocation.arguments.len() != 2 {
+            return None;
+        }
+
+        let (current, _next) = self.atomic_integer_field_updater_add(invocation, 1)?;
+
+        Some(current)
+    }
+
+    pub(in crate::dex_run) fn atomic_integer_field_updater_get_and_decrement(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<i32> {
+        if invocation.arguments.len() != 2 {
+            return None;
+        }
+
+        let (current, _next) = self.atomic_integer_field_updater_add(invocation, -1)?;
+
+        Some(current)
+    }
+
+    pub(in crate::dex_run) fn atomic_integer_field_updater_add_and_get(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<i32> {
+        if invocation.arguments.len() != 3 {
+            return None;
+        }
+        let DexValue::Int(delta) = invocation.arguments[2] else {
+            return None;
+        };
+
+        let (_current, next) = self.atomic_integer_field_updater_add(invocation, delta)?;
+
+        Some(next)
+    }
+
+    pub(in crate::dex_run) fn atomic_integer_field_updater_decrement_and_get(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<i32> {
+        if invocation.arguments.len() != 2 {
+            return None;
+        }
+
+        let (_current, next) = self.atomic_integer_field_updater_add(invocation, -1)?;
+
+        Some(next)
+    }
+
+    fn atomic_integer_field_updater_add(
+        &self,
+        invocation: &DexInvocation,
+        delta: i32,
+    ) -> Option<(i32, i32)> {
+        if invocation.arguments.len() < 2 {
+            return None;
+        }
+
+        let (target_descriptor, field_name) =
+            atomic_integer_field_updater_parts(&invocation.arguments[0])?;
+        let target = &invocation.arguments[1];
+        let class_descriptor = value_class_descriptor(target)?;
+        if !self.descriptor_matches_type(class_descriptor, &target_descriptor) {
+            return Some((0, 0));
+        }
+
+        let field = DexFieldId {
+            class_descriptor: target_descriptor,
+            type_descriptor: "I".to_owned(),
+            name: field_name,
+        };
+        let current = match self
+            .read_stored_instance_field(target, &field)
+            .or_else(|| default_field_value(&field))
+        {
+            Some(DexValue::Int(value)) => value,
+            _ => return None,
+        };
+        let next = current.checked_add(delta)?;
+
+        self.write_stored_instance_field(target, &field, DexValue::Int(next))
+            .then_some((current, next))
+    }
+
+    pub(in crate::dex_run) fn atomic_long_field_updater_get(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<i64> {
+        if invocation.arguments.len() != 2 {
+            return None;
+        }
+
+        let (target_descriptor, field_name) =
+            atomic_long_field_updater_parts(&invocation.arguments[0])?;
+        let target = &invocation.arguments[1];
+        let class_descriptor = value_class_descriptor(target)?;
+        if !self.descriptor_matches_type(class_descriptor, &target_descriptor) {
+            return Some(0);
+        }
+
+        let field = DexFieldId {
+            class_descriptor: target_descriptor,
+            type_descriptor: "J".to_owned(),
+            name: field_name,
+        };
+
+        match self
+            .read_stored_instance_field(target, &field)
+            .or_else(|| default_field_value(&field))
+        {
+            Some(DexValue::Long(value)) => Some(value),
+            Some(DexValue::Int(value)) => Some(i64::from(value)),
+            _ => None,
+        }
+    }
+
+    pub(in crate::dex_run) fn atomic_long_field_updater_get_and_increment(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<i64> {
+        let (current, _next) = self.atomic_long_field_updater_add(invocation, 1)?;
+
+        Some(current)
+    }
+
+    pub(in crate::dex_run) fn atomic_long_field_updater_increment_and_get(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<i64> {
+        let (_current, next) = self.atomic_long_field_updater_add(invocation, 1)?;
+
+        Some(next)
+    }
+
+    pub(in crate::dex_run) fn atomic_long_field_updater_get_and_decrement(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<i64> {
+        let (current, _next) = self.atomic_long_field_updater_add(invocation, -1)?;
+
+        Some(current)
+    }
+
+    pub(in crate::dex_run) fn atomic_long_field_updater_decrement_and_get(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<i64> {
+        let (_current, next) = self.atomic_long_field_updater_add(invocation, -1)?;
+
+        Some(next)
+    }
+
+    fn atomic_long_field_updater_add(
+        &self,
+        invocation: &DexInvocation,
+        delta: i64,
+    ) -> Option<(i64, i64)> {
+        if invocation.arguments.len() != 2 {
+            return None;
+        }
+
+        let (target_descriptor, field_name) =
+            atomic_long_field_updater_parts(&invocation.arguments[0])?;
+        let target = &invocation.arguments[1];
+        let class_descriptor = value_class_descriptor(target)?;
+        if !self.descriptor_matches_type(class_descriptor, &target_descriptor) {
+            return Some((0, 0));
+        }
+
+        let field = DexFieldId {
+            class_descriptor: target_descriptor,
+            type_descriptor: "J".to_owned(),
+            name: field_name,
+        };
+        let current = match self
+            .read_stored_instance_field(target, &field)
+            .or_else(|| default_field_value(&field))
+        {
+            Some(DexValue::Long(value)) => value,
+            Some(DexValue::Int(value)) => i64::from(value),
+            _ => return None,
+        };
+        let next = current.checked_add(delta)?;
+
+        self.write_stored_instance_field(target, &field, DexValue::Long(next))
+            .then_some((current, next))
+    }
+
+    pub(in crate::dex_run) fn atomic_long_field_updater_add_and_get(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<i64> {
+        if invocation.arguments.len() != 4 {
+            return None;
+        }
+
+        let (target_descriptor, field_name) =
+            atomic_long_field_updater_parts(&invocation.arguments[0])?;
+        let target = &invocation.arguments[1];
+        let class_descriptor = value_class_descriptor(target)?;
+        if !self.descriptor_matches_type(class_descriptor, &target_descriptor) {
+            return Some(0);
+        }
+        let DexValue::Long(delta) = invocation.arguments[2] else {
+            return None;
+        };
+        let DexValue::Long(delta_high_slot) = invocation.arguments[3] else {
+            return None;
+        };
+        if delta != delta_high_slot {
+            return None;
+        }
+
+        let field = DexFieldId {
+            class_descriptor: target_descriptor,
+            type_descriptor: "J".to_owned(),
+            name: field_name,
+        };
+        let current = match self
+            .read_stored_instance_field(target, &field)
+            .or_else(|| default_field_value(&field))
+        {
+            Some(DexValue::Long(value)) => value,
+            Some(DexValue::Int(value)) => i64::from(value),
+            _ => return None,
+        };
+        let next = current.checked_add(delta)?;
+
+        self.write_stored_instance_field(target, &field, DexValue::Long(next))
+            .then_some(next)
+    }
+
+    pub(in crate::dex_run) fn atomic_long_field_updater_set(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<()> {
+        if invocation.arguments.len() != 4 {
+            return None;
+        }
+
+        let (target_descriptor, field_name) =
+            atomic_long_field_updater_parts(&invocation.arguments[0])?;
+        let target = &invocation.arguments[1];
+        let class_descriptor = value_class_descriptor(target)?;
+        if !self.descriptor_matches_type(class_descriptor, &target_descriptor) {
+            return Some(());
+        }
+        let DexValue::Long(value) = invocation.arguments[2] else {
+            return None;
+        };
+        let DexValue::Long(high_slot_value) = invocation.arguments[3] else {
+            return None;
+        };
+        if value != high_slot_value {
+            return None;
+        }
+
+        let field = DexFieldId {
+            class_descriptor: target_descriptor,
+            type_descriptor: "J".to_owned(),
+            name: field_name,
+        };
+
+        self.write_stored_instance_field(target, &field, DexValue::Long(value))
+            .then_some(())
+    }
+
+    pub(in crate::dex_run) fn atomic_long_field_updater_compare_and_set(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<i32> {
+        if invocation.arguments.len() != 6 {
+            return None;
+        }
+
+        let (target_descriptor, field_name) =
+            atomic_long_field_updater_parts(&invocation.arguments[0])?;
+        let target = &invocation.arguments[1];
+        let class_descriptor = value_class_descriptor(target)?;
+        if !self.descriptor_matches_type(class_descriptor, &target_descriptor) {
+            return Some(0);
+        }
+        let DexValue::Long(expected) = invocation.arguments[2] else {
+            return None;
+        };
+        let DexValue::Long(expected_high_slot) = invocation.arguments[3] else {
+            return None;
+        };
+        let DexValue::Long(update) = invocation.arguments[4] else {
+            return None;
+        };
+        let DexValue::Long(update_high_slot) = invocation.arguments[5] else {
+            return None;
+        };
+        if expected != expected_high_slot || update != update_high_slot {
+            return None;
+        }
+
+        let field = DexFieldId {
+            class_descriptor: target_descriptor,
+            type_descriptor: "J".to_owned(),
+            name: field_name,
+        };
+        let current = match self
+            .read_stored_instance_field(target, &field)
+            .or_else(|| default_field_value(&field))
+        {
+            Some(DexValue::Long(value)) => value,
+            Some(DexValue::Int(value)) => i64::from(value),
+            _ => return None,
+        };
+
+        if current != expected {
+            return Some(0);
+        }
+
+        self.write_stored_instance_field(target, &field, DexValue::Long(update))
+            .then_some(1)
+    }
+
+    pub(in crate::dex_run) fn initialize_weak_reference(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<()> {
+        if invocation.arguments.len() != 2 {
+            return None;
+        }
+
+        let object_key = map_identity_key(&invocation.arguments[0]);
+        let value = invocation.arguments[1].clone();
+
+        self.runtime
+            .borrow_mut()
+            .weak_reference_values
+            .insert(object_key, value);
+
+        Some(())
+    }
+
+    pub(in crate::dex_run) fn initialize_weak_reference_with_queue(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<()> {
+        if invocation.arguments.len() != 3 {
+            return None;
+        }
+
+        if !matches!(
+            invocation.arguments[2],
+            DexValue::Object(_) | DexValue::Reference(_) | DexValue::Null
+        ) {
+            return None;
+        }
+
+        let weak_reference_invocation = DexInvocation {
+            arguments: smallvec::smallvec![
+                invocation.arguments[0].clone(),
+                invocation.arguments[1].clone(),
+            ],
+            ..invocation.clone()
+        };
+
+        self.initialize_weak_reference(&weak_reference_invocation)
+    }
+
+    // cite: libcore Reference.java#clear
+    pub(in crate::dex_run) fn weak_reference_clear(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<()> {
+        if invocation.arguments.len() != 1 {
+            return None;
+        }
+
+        let object_key = map_identity_key(&invocation.arguments[0]);
+        self.runtime
+            .borrow_mut()
+            .weak_reference_values
+            .insert(object_key, DexValue::Null);
+
+        Some(())
+    }
+
+    pub(in crate::dex_run) fn weak_reference_get(
+        &self,
+        invocation: Option<&DexInvocation>,
+    ) -> Option<DexValue> {
+        let Some(invocation) = invocation else {
+            return Some(DexValue::Reference(std::rc::Rc::from(
+                "Landroidx/lifecycle/LifecycleOwner;",
+            )));
+        };
+
+        if invocation.arguments.len() != 1 {
+            return None;
+        }
+
+        let object_key = map_identity_key(&invocation.arguments[0]);
+
+        Some(
+            self.runtime
+                .borrow()
+                .weak_reference_values
+                .get(&object_key)
+                .cloned()
+                .unwrap_or(DexValue::Reference(std::rc::Rc::from(
+                    "Landroidx/lifecycle/LifecycleOwner;",
+                ))),
+        )
+    }
+
+    pub(in crate::dex_run) fn initialize_handler(&self, invocation: &DexInvocation) -> Option<()> {
+        let handler_key = map_identity_key(&invocation.arguments[0]);
+        let looper = match invocation.arguments.as_slice() {
+            [_handler] => DexValue::Reference(std::rc::Rc::from("Landroid/os/Looper;:main")),
+            [_handler, DexValue::Object(_) | DexValue::Reference(_)] => {
+                invocation.arguments[1].clone()
+            }
+            _ => return None,
+        };
+
+        self.runtime
+            .borrow_mut()
+            .handler_loopers
+            .insert(handler_key, looper);
+
+        Some(())
+    }
+
+    pub(in crate::dex_run) fn create_async_handler(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<DexValue> {
+        if invocation.arguments.len() != 1 {
+            return None;
+        }
+
+        let looper = match &invocation.arguments[0] {
+            DexValue::Object(_) | DexValue::Reference(_) => invocation.arguments[0].clone(),
+            DexValue::Uninitialized
+            | DexValue::Null
+            | DexValue::Int(_)
+            | DexValue::Long(_)
+            | DexValue::Float(_)
+            | DexValue::String(_) => return None,
+        };
+
+        Some(self.create_handler_for_looper(looper))
+    }
+
+    pub(in crate::dex_run) fn create_handler_for_looper(&self, looper: DexValue) -> DexValue {
+        let handler = self.allocate_object("Landroid/os/Handler;".to_owned());
+        let handler_key = map_identity_key(&handler);
+
+        self.runtime
+            .borrow_mut()
+            .handler_loopers
+            .insert(handler_key, looper);
+
+        handler
+    }
+
+    pub(in crate::dex_run) fn handler_looper(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<DexValue> {
+        if invocation.arguments.len() != 1 {
+            return None;
+        }
+
+        let handler_key = map_identity_key(&invocation.arguments[0]);
+
+        Some(
+            self.runtime
+                .borrow()
+                .handler_loopers
+                .get(&handler_key)
+                .cloned()
+                .unwrap_or(DexValue::Reference(std::rc::Rc::from(
+                    "Landroid/os/Looper;:main",
+                ))),
+        )
+    }
+
+    pub(in crate::dex_run) fn post_handler_runnable(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<()> {
+        if invocation.arguments.len() != 2 {
+            return None;
+        }
+
+        let handler_key = map_identity_key(&invocation.arguments[0]);
+        let runnable = match &invocation.arguments[1] {
+            DexValue::Object(_) | DexValue::Reference(_) => invocation.arguments[1].clone(),
+            DexValue::Uninitialized
+            | DexValue::Null
+            | DexValue::Int(_)
+            | DexValue::Long(_)
+            | DexValue::Float(_)
+            | DexValue::String(_) => return None,
+        };
+
+        self.runtime
+            .borrow_mut()
+            .post_handler_runnable(handler_key, runnable, 0, false);
+
+        Some(())
+    }
+
+    pub(in crate::dex_run) fn executor_execute(&self, invocation: &DexInvocation) -> Option<()> {
+        let DexValue::Reference(executor) = invocation.arguments.first()? else {
+            return None;
+        };
+
+        // cite: frameworks-base HandlerExecutor.java#execute
+        // cite: libcore ThreadPoolExecutor.java#execute
+        let known_executor = executor.as_ref() == "Ljava/util/concurrent/Executor;.main"
+            || executor.as_ref() == "Ljava/util/concurrent/ExecutorService;.single"
+            || executor.as_ref() == "Ljava/util/concurrent/ExecutorService;.cached"
+            || executor.as_ref() == "Ljava/util/concurrent/ScheduledExecutorService;.single"
+            || executor.starts_with("Ljava/util/concurrent/ExecutorService;.fixed/");
+        if !known_executor {
+            return None;
+        }
+
+        self.post_handler_runnable(invocation)
+    }
+
+    // cite: libcore FutureTask.java#FutureTask
+    pub(in crate::dex_run) fn future_task_init(&self, invocation: &DexInvocation) -> Option<()> {
+        if invocation.arguments.len() != 2 || !dex_value_is_object_like(&invocation.arguments[0]) {
+            return None;
+        }
+        if !dex_value_is_object_like(&invocation.arguments[1]) {
+            return None;
+        }
+
+        self.write_stored_instance_field(
+            &invocation.arguments[0],
+            &future_task_callable_field(),
+            invocation.arguments[1].clone(),
+        );
+
+        Some(())
+    }
+
+    // cite: libcore FutureTask.java#FutureTask
+    pub(in crate::dex_run) fn future_task_init_runnable(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<()> {
+        if invocation.arguments.len() != 3 || !dex_value_is_object_like(&invocation.arguments[0]) {
+            return None;
+        }
+        if !dex_value_is_object_like(&invocation.arguments[1]) {
+            return None;
+        }
+
+        self.write_stored_instance_field(
+            &invocation.arguments[0],
+            &future_task_runnable_field(),
+            invocation.arguments[1].clone(),
+        );
+        self.write_stored_instance_field(
+            &invocation.arguments[0],
+            &future_task_runnable_result_field(),
+            invocation.arguments[2].clone(),
+        );
+
+        Some(())
+    }
+
+    // cite: libcore FutureTask.java#cancel
+    pub(in crate::dex_run) fn future_task_cancel(&self, invocation: &DexInvocation) -> Option<i32> {
+        if invocation.arguments.len() != 2 {
+            return None;
+        }
+        if !dex_value_is_object_like(&invocation.arguments[0]) {
+            return None;
+        }
+        let DexValue::Int(_may_interrupt) = invocation.arguments[1] else {
+            return None;
+        };
+
+        let receiver = &invocation.arguments[0];
+        let already_done = self.read_stored_instance_field(receiver, &future_task_done_field())
+            == Some(DexValue::Int(1));
+        if already_done {
+            return Some(0);
+        }
+
+        self.write_stored_instance_field(receiver, &future_task_done_field(), DexValue::Int(1));
+        self.write_stored_instance_field(
+            receiver,
+            &future_task_cancelled_field(),
+            DexValue::Int(1),
+        );
+
+        Some(1)
+    }
+
+    // cite: libcore FutureTask.java#isCancelled
+    pub(in crate::dex_run) fn future_task_is_cancelled(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<i32> {
+        if invocation.arguments.len() != 1 {
+            return None;
+        }
+        if !dex_value_is_object_like(&invocation.arguments[0]) {
+            return None;
+        }
+
+        Some(
+            match self.read_stored_instance_field(
+                &invocation.arguments[0],
+                &future_task_cancelled_field(),
+            ) {
+                Some(DexValue::Int(1)) => 1,
+                _ => 0,
+            },
+        )
+    }
+
+    // cite: libcore FutureTask.java#isDone
+    pub(in crate::dex_run) fn future_task_is_done(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<i32> {
+        if invocation.arguments.len() != 1 {
+            return None;
+        }
+        if !dex_value_is_object_like(&invocation.arguments[0]) {
+            return None;
+        }
+
+        Some(
+            match self
+                .read_stored_instance_field(&invocation.arguments[0], &future_task_done_field())
+            {
+                Some(DexValue::Int(1)) => 1,
+                _ => 0,
+            },
+        )
+    }
+
+    pub(in crate::dex_run) fn post_handler_runnable_at_front(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<()> {
+        if invocation.arguments.len() != 2 {
+            return None;
+        }
+
+        let handler_key = map_identity_key(&invocation.arguments[0]);
+        let runnable = match &invocation.arguments[1] {
+            DexValue::Object(_) | DexValue::Reference(_) => invocation.arguments[1].clone(),
+            DexValue::Uninitialized
+            | DexValue::Null
+            | DexValue::Int(_)
+            | DexValue::Long(_)
+            | DexValue::Float(_)
+            | DexValue::String(_) => return None,
+        };
+
+        self.runtime
+            .borrow_mut()
+            .post_handler_runnable(handler_key, runnable, 0, true);
+
+        Some(())
+    }
+
+    pub(in crate::dex_run) fn post_delayed_handler_runnable(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<()> {
+        if invocation.arguments.len() != 4 {
+            return None;
+        }
+
+        let handler_key = map_identity_key(&invocation.arguments[0]);
+        let runnable = match &invocation.arguments[1] {
+            DexValue::Object(_) | DexValue::Reference(_) => invocation.arguments[1].clone(),
+            DexValue::Uninitialized
+            | DexValue::Null
+            | DexValue::Int(_)
+            | DexValue::Long(_)
+            | DexValue::Float(_)
+            | DexValue::String(_) => return None,
+        };
+        let DexValue::Long(delay_millis) = invocation.arguments[2] else {
+            return None;
+        };
+        let DexValue::Long(high_slot_value) = invocation.arguments[3] else {
+            return None;
+        };
+
+        if high_slot_value != delay_millis {
+            return None;
+        }
+
+        self.runtime
+            .borrow_mut()
+            .post_handler_runnable(handler_key, runnable, delay_millis, false);
+
+        Some(())
+    }
+
+    // cite: frameworks-base Handler.java#removeCallbacks
+    // cite: frameworks-base MessageQueue.java#removeMessages
+    pub(in crate::dex_run) fn remove_handler_callbacks(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<()> {
+        if invocation.arguments.len() != 2 {
+            return None;
+        }
+
+        let handler_key = map_identity_key(&invocation.arguments[0]);
+        let runnable = match &invocation.arguments[1] {
+            DexValue::Object(_) | DexValue::Reference(_) => invocation.arguments[1].clone(),
+            DexValue::Uninitialized
+            | DexValue::Null
+            | DexValue::Int(_)
+            | DexValue::Long(_)
+            | DexValue::Float(_)
+            | DexValue::String(_) => return None,
+        };
+
+        let runnable_key = map_identity_key(&runnable);
+        self.runtime.borrow_mut().handler_posts.retain(|post| {
+            post.handler_key != handler_key || map_identity_key(&post.runnable) != runnable_key
+        });
+
+        Some(())
+    }
+
+    pub(in crate::dex_run) fn post_choreographer_frame_callback(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<()> {
+        if invocation.arguments.len() != 2
+            || !dex_value_is_object_like(&invocation.arguments[0])
+            || !dex_value_is_object_like(&invocation.arguments[1])
+        {
+            return None;
+        }
+
+        self.store_choreographer_frame_callback(invocation.arguments[1].clone(), 0)
+    }
+
+    pub(in crate::dex_run) fn post_delayed_choreographer_frame_callback(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<()> {
+        if invocation.arguments.len() != 4 {
+            return None;
+        }
+
+        let DexValue::Long(delay_millis) = invocation.arguments[2] else {
+            return None;
+        };
+        let DexValue::Long(high_slot_value) = invocation.arguments[3] else {
+            return None;
+        };
+        if delay_millis != high_slot_value {
+            return None;
+        }
+        if !dex_value_is_object_like(&invocation.arguments[0])
+            || !dex_value_is_object_like(&invocation.arguments[1])
+        {
+            return None;
+        }
+
+        self.store_choreographer_frame_callback(invocation.arguments[1].clone(), delay_millis)
+    }
+
+    pub(in crate::dex_run) fn remove_choreographer_frame_callback(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<()> {
+        if invocation.arguments.len() != 2
+            || !dex_value_is_object_like(&invocation.arguments[0])
+            || !dex_value_is_object_like(&invocation.arguments[1])
+        {
+            return None;
+        }
+
+        self.runtime
+            .borrow_mut()
+            .remove_choreographer_frame_callback(&invocation.arguments[1]);
+
+        Some(())
+    }
+
+    pub(in crate::dex_run) fn post_choreographer_callback(
+        &self,
+        invocation: &DexInvocation,
+        delayed: bool,
+    ) -> Option<()> {
+        let expected_len = if delayed { 6 } else { 4 };
+        if invocation.arguments.len() != expected_len
+            || !dex_value_is_object_like(&invocation.arguments[0])
+        {
+            return None;
+        }
+        let DexValue::Int(callback_type) = invocation.arguments[1] else {
+            return None;
+        };
+        if !(0..=4).contains(&callback_type) || !dex_value_is_object_like(&invocation.arguments[2])
+        {
+            return None;
+        }
+        let delay_millis = if delayed {
+            let DexValue::Long(delay_millis) = invocation.arguments[4] else {
+                return None;
+            };
+            let DexValue::Long(high_slot_value) = invocation.arguments[5] else {
+                return None;
+            };
+            if delay_millis != high_slot_value {
+                return None;
+            }
+            delay_millis
+        } else {
+            0
+        };
+
+        // cite: frameworks-base Choreographer.java#postCallback, postCallbackDelayedInternal
+        self.runtime
+            .borrow_mut()
+            .post_choreographer_runnable_callback(
+                callback_type,
+                invocation.arguments[2].clone(),
+                invocation.arguments[3].clone(),
+                delay_millis,
+            );
+
+        Some(())
+    }
+
+    pub(in crate::dex_run) fn remove_choreographer_callbacks(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<()> {
+        if invocation.arguments.len() != 4 || !dex_value_is_object_like(&invocation.arguments[0]) {
+            return None;
+        }
+        let DexValue::Int(callback_type) = invocation.arguments[1] else {
+            return None;
+        };
+        if !(0..=4).contains(&callback_type) {
+            return None;
+        }
+
+        // cite: frameworks-base Choreographer.java#removeCallbacks, removeCallbacksInternal
+        self.runtime
+            .borrow_mut()
+            .remove_choreographer_runnable_callbacks(
+                callback_type,
+                &invocation.arguments[2],
+                &invocation.arguments[3],
+            );
+
+        Some(())
+    }
+
+    fn store_choreographer_frame_callback(
+        &self,
+        callback: DexValue,
+        delay_millis: i64,
+    ) -> Option<()> {
+        // cite: frameworks-base Choreographer.java#postFrameCallbackDelayed, postCallbackDelayedInternal
+        self.runtime
+            .borrow_mut()
+            .post_choreographer_frame_callback(callback, delay_millis);
+
+        Some(())
+    }
+
+    pub(in crate::dex_run) fn handler_obtain_message(
+        &self,
+        invocation: &DexInvocation,
+    ) -> Option<DexValue> {
+        if invocation.arguments.len() != 3 {
+            return None;
+        }
+
+        if !dex_value_is_object_like(&invocation.arguments[0]) {
+            return None;
+        }
+        let DexValue::Int(what) = invocation.arguments[1] else {
+            return None;
+        };
+        let object = match &invocation.arguments[2] {
+            DexValue::Null | DexValue::Int(0) => DexValue::Null,
+            DexValue::Object(_) | DexValue::Reference(_) => invocation.arguments[2].clone(),
+            DexValue::Uninitialized
+            | DexValue::Int(_)
+            | DexValue::Long(_)
+            | DexValue::Float(_)
+            | DexValue::String(_) => return None,
+        };
+
+        let message = self.allocate_object("Landroid/os/Message;".to_owned());
+        self.write_stored_instance_field(&message, &message_int_field("what"), DexValue::Int(what));
+        self.write_stored_instance_field(&message, &message_object_field("obj"), object);
+        self.write_stored_instance_field(
+            &message,
+            &message_handler_field("target"),
+            invocation.arguments[0].clone(),
+        );
+
+        Some(message)
+    }
+}
+
+pub(in crate::dex_run) fn message_int_field(name: &str) -> DexFieldId {
+    DexFieldId {
+        class_descriptor: "Landroid/os/Message;".to_owned(),
+        type_descriptor: "I".to_owned(),
+        name: name.to_owned(),
+    }
+}
+
+pub(in crate::dex_run) fn message_object_field(name: &str) -> DexFieldId {
+    DexFieldId {
+        class_descriptor: "Landroid/os/Message;".to_owned(),
+        type_descriptor: "Ljava/lang/Object;".to_owned(),
+        name: name.to_owned(),
+    }
+}
+
+pub(in crate::dex_run) fn message_handler_field(name: &str) -> DexFieldId {
+    DexFieldId {
+        class_descriptor: "Landroid/os/Message;".to_owned(),
+        type_descriptor: "Landroid/os/Handler;".to_owned(),
+        name: name.to_owned(),
+    }
+}
+
+pub(in crate::dex_run) fn atomic_reference_key(value: &DexValue) -> Option<String> {
+    match value {
+        DexValue::Object(_) | DexValue::Reference(_) => Some(map_identity_key(value)),
+        DexValue::Uninitialized
+        | DexValue::Null
+        | DexValue::Int(_)
+        | DexValue::Long(_)
+        | DexValue::Float(_)
+        | DexValue::String(_) => None,
+    }
+}
+
+pub(in crate::dex_run) fn atomic_reference_value(value: &DexValue) -> Option<DexValue> {
+    match value {
+        DexValue::Null | DexValue::Int(0) => Some(DexValue::Null),
+        DexValue::String(_) | DexValue::Object(_) | DexValue::Reference(_) => Some(value.clone()),
+        DexValue::Uninitialized | DexValue::Int(_) | DexValue::Long(_) | DexValue::Float(_) => None,
+    }
+}
+
+fn normalize_atomic_boolean(value: i32) -> i32 {
+    if value == 0 {
+        0
+    } else {
+        1
+    }
+}
+
+pub(in crate::dex_run) fn atomic_reference_field_updater_new(
+    invocation: &DexInvocation,
+) -> Option<DexValue> {
+    if invocation.arguments.len() != 3 {
+        return None;
+    }
+
+    let target_descriptor = class_reference_descriptor_from_value(&invocation.arguments[0])?;
+    let value_descriptor = class_reference_descriptor_from_value(&invocation.arguments[1])?;
+    let DexValue::String(field_name) = &invocation.arguments[2] else {
+        return None;
+    };
+
+    Some(DexValue::Reference(std::rc::Rc::from(format!(
+        "Ljava/util/concurrent/atomic/AtomicReferenceFieldUpdater;:{target_descriptor}:{value_descriptor}:{field_name}"
+    ))))
+}
+
+pub(in crate::dex_run) fn atomic_integer_field_updater_new(
+    invocation: &DexInvocation,
+) -> Option<DexValue> {
+    if invocation.arguments.len() != 2 {
+        return None;
+    }
+
+    let target_descriptor = class_reference_descriptor_from_value(&invocation.arguments[0])?;
+    let DexValue::String(field_name) = &invocation.arguments[1] else {
+        return None;
+    };
+
+    Some(DexValue::Reference(std::rc::Rc::from(format!(
+        "Ljava/util/concurrent/atomic/AtomicIntegerFieldUpdater;:{target_descriptor}:{field_name}"
+    ))))
+}
+
+pub(in crate::dex_run) fn atomic_long_field_updater_new(
+    invocation: &DexInvocation,
+) -> Option<DexValue> {
+    if invocation.arguments.len() != 2 {
+        return None;
+    }
+
+    let target_descriptor = class_reference_descriptor_from_value(&invocation.arguments[0])?;
+    let DexValue::String(field_name) = &invocation.arguments[1] else {
+        return None;
+    };
+
+    Some(DexValue::Reference(std::rc::Rc::from(format!(
+        "Ljava/util/concurrent/atomic/AtomicLongFieldUpdater;:{target_descriptor}:{field_name}"
+    ))))
+}
+
+pub(in crate::dex_run) fn atomic_reference_field_updater_parts(
+    value: &DexValue,
+) -> Option<(String, String, String)> {
+    let DexValue::Reference(reference) = value else {
+        return None;
+    };
+    let payload =
+        reference.strip_prefix("Ljava/util/concurrent/atomic/AtomicReferenceFieldUpdater;:")?;
+
+    let mut parts = payload.splitn(3, ':');
+    let target_descriptor = parts.next()?;
+    let value_or_field = parts.next();
+    let field_name = parts.next();
+
+    if let (Some(value_descriptor), Some(field_name)) = (value_or_field, field_name) {
+        return Some((
+            target_descriptor.to_owned(),
+            value_descriptor.to_owned(),
+            field_name.to_owned(),
+        ));
+    }
+
+    let (target_descriptor, field_name) = payload.rsplit_once('.')?;
+
+    Some((
+        target_descriptor.to_owned(),
+        "Ljava/lang/Object;".to_owned(),
+        field_name.to_owned(),
+    ))
+}
+
+pub(in crate::dex_run) fn atomic_integer_field_updater_parts(
+    value: &DexValue,
+) -> Option<(String, String)> {
+    let DexValue::Reference(reference) = value else {
+        return None;
+    };
+    let payload =
+        reference.strip_prefix("Ljava/util/concurrent/atomic/AtomicIntegerFieldUpdater;:")?;
+    let (target_descriptor, field_name) = payload.rsplit_once(':')?;
+
+    Some((target_descriptor.to_owned(), field_name.to_owned()))
+}
+
+pub(in crate::dex_run) fn atomic_long_field_updater_parts(
+    value: &DexValue,
+) -> Option<(String, String)> {
+    let DexValue::Reference(reference) = value else {
+        return None;
+    };
+    let payload =
+        reference.strip_prefix("Ljava/util/concurrent/atomic/AtomicLongFieldUpdater;:")?;
+    let (target_descriptor, field_name) = payload.rsplit_once(':')?;
+
+    Some((target_descriptor.to_owned(), field_name.to_owned()))
+}
+
+pub(in crate::dex_run) fn future_task_callable_field() -> DexFieldId {
+    DexFieldId {
+        class_descriptor: "Ljava/util/concurrent/FutureTask;".to_owned(),
+        type_descriptor: "Ljava/util/concurrent/Callable;".to_owned(),
+        name: "callable".to_owned(),
+    }
+}
+
+pub(in crate::dex_run) fn future_task_runnable_field() -> DexFieldId {
+    // cite: libcore FutureTask.java#FutureTask
+    DexFieldId {
+        class_descriptor: "Ljava/util/concurrent/FutureTask;".to_owned(),
+        type_descriptor: "Ljava/lang/Runnable;".to_owned(),
+        name: "runnable".to_owned(),
+    }
+}
+
+pub(in crate::dex_run) fn future_task_runnable_result_field() -> DexFieldId {
+    // cite: libcore Executors.java#callable, RunnableAdapter
+    DexFieldId {
+        class_descriptor: "Ljava/util/concurrent/FutureTask;".to_owned(),
+        type_descriptor: "Ljava/lang/Object;".to_owned(),
+        name: "runnableResult".to_owned(),
+    }
+}
+
+pub(in crate::dex_run) fn future_task_done_field() -> DexFieldId {
+    DexFieldId {
+        class_descriptor: "Ljava/util/concurrent/FutureTask;".to_owned(),
+        type_descriptor: "Z".to_owned(),
+        name: "done".to_owned(),
+    }
+}
+
+pub(in crate::dex_run) fn future_task_cancelled_field() -> DexFieldId {
+    // cite: libcore FutureTask.java#cancel, isCancelled
+    DexFieldId {
+        class_descriptor: "Ljava/util/concurrent/FutureTask;".to_owned(),
+        type_descriptor: "Z".to_owned(),
+        name: "cancelled".to_owned(),
+    }
+}
+
+pub(in crate::dex_run) fn future_task_outcome_field() -> DexFieldId {
+    DexFieldId {
+        class_descriptor: "Ljava/util/concurrent/FutureTask;".to_owned(),
+        type_descriptor: "Ljava/lang/Object;".to_owned(),
+        name: "outcome".to_owned(),
+    }
+}
+
+pub(in crate::dex_run) fn future_task_exception_field() -> DexFieldId {
+    DexFieldId {
+        class_descriptor: "Ljava/util/concurrent/FutureTask;".to_owned(),
+        type_descriptor: "Ljava/lang/Throwable;".to_owned(),
+        name: "outcomeException".to_owned(),
+    }
+}
+
+pub(in crate::dex_run) fn fixed_thread_pool_reference(
+    invocation: &DexInvocation,
+) -> Option<DexValue> {
+    if invocation.arguments.len() != 2 {
+        return None;
+    }
+
+    let DexValue::Int(thread_count) = invocation.arguments[0] else {
+        return None;
+    };
+
+    if thread_count <= 0 {
+        return None;
+    }
+
+    Some(DexValue::Reference(std::rc::Rc::from(format!(
+        "Ljava/util/concurrent/ExecutorService;.fixed/{thread_count}"
+    ))))
+}

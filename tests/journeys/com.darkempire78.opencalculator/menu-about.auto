@@ -1,0 +1,25 @@
+0    waittext "AC" 15000
+300  tap id menuButton
+300  waittext "Support Us" 5000
+300  tap text "Support Us"
+500  waittext "Close" 8000
+0    assert text "Support Us"
+300  tap text "Close"
+500  assert notext "Close"
+0    assert text "AC"
+300  tap id menuButton
+300  waittext "About" 5000
+0    assert text "Settings"
+500  dump ui menu.xml
+300  tap text "About"
+500  waitidle 5000
+0    assert text "GitHub"
+0    assert text "Version 3.2.0 (53)"
+0    assert notext "AC"
+500  dump ui about.xml
+0    screenshot about.png
+300  tap id about_back_button
+500  waitidle 5000
+0    assert text "AC"
+0    assert notext "GitHub"
+500  dump ui closed.xml

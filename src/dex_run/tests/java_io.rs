@@ -1,0 +1,1605 @@
+use std::fs;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use super::super::*;
+use super::helpers::*;
+use crate::external_storage::{
+    ExternalStoragePolicy, ExternalStorageRuntimeAccess, READ_EXTERNAL_STORAGE,
+    WRITE_EXTERNAL_STORAGE,
+};
+
+#[test]
+fn libcore_file_parent_child_constructor_appends_an_absolute_child() {
+    let program = DexProgram::new(Vec::new());
+    let constructor = DexMethodId {
+        class_descriptor: "Ljava/io/File;".to_owned(),
+        name: "<init>".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "VLL".to_owned(),
+            return_type: "V".to_owned(),
+            parameters: vec!["Ljava/io/File;".to_owned(), "Ljava/lang/String;".to_owned()],
+        },
+    };
+    let get_parent_file = DexMethodId {
+        class_descriptor: "Ljava/io/File;".to_owned(),
+        name: "getParentFile".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "L".to_owned(),
+            return_type: "Ljava/io/File;".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+    let file = DexValue::Object(DexObjectRef {
+        id: 1,
+        class_descriptor: std::rc::Rc::from("Ljava/io/File;"),
+    });
+    let parent = file_value("/data/user/0/com.example/cache");
+    let path_field = DexFieldId {
+        class_descriptor: "Ljava/io/File;".to_owned(),
+        type_descriptor: "Ljava/lang/String;".to_owned(),
+        name: "path".to_owned(),
+    };
+
+    assert_eq!(
+        program.invoke_builtin_method(
+            &constructor,
+            Some(&test_invocation(vec![
+                file.clone(),
+                parent,
+                DexValue::String(std::rc::Rc::from("/room.db"))
+            ]))
+        ),
+        Some(DexExecutionResult::Void)
+    );
+    assert_eq!(
+        program.read_stored_instance_field(&file, &path_field),
+        Some(DexValue::String(std::rc::Rc::from(
+            "/data/user/0/com.example/cache/room.db"
+        )))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&get_parent_file, Some(&test_invocation(vec![file]))),
+        Some(DexExecutionResult::Value(DexValue::Reference(
+            std::rc::Rc::from("Ljava/io/File;:/data/user/0/com.example/cache")
+        )))
+    );
+}
+
+#[test]
+fn libcore_file_single_string_constructor_normalizes_pathname() {
+    // cite: libcore File.java#File
+    let program = DexProgram::new(Vec::new());
+    let constructor = DexMethodId {
+        class_descriptor: "Ljava/io/File;".to_owned(),
+        name: "<init>".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "VL".to_owned(),
+            return_type: "V".to_owned(),
+            parameters: vec!["Ljava/lang/String;".to_owned()],
+        },
+    };
+    let get_absolute_path = DexMethodId {
+        class_descriptor: "Ljava/io/File;".to_owned(),
+        name: "getAbsolutePath".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "L".to_owned(),
+            return_type: "Ljava/lang/String;".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+    let file = DexValue::Object(DexObjectRef {
+        id: 1,
+        class_descriptor: std::rc::Rc::from("Ljava/io/File;"),
+    });
+    let path_field = DexFieldId {
+        class_descriptor: "Ljava/io/File;".to_owned(),
+        type_descriptor: "Ljava/lang/String;".to_owned(),
+        name: "path".to_owned(),
+    };
+
+    assert_eq!(
+        program.invoke_builtin_method(
+            &constructor,
+            Some(&test_invocation(vec![
+                file.clone(),
+                DexValue::String(std::rc::Rc::from(
+                    "/storage/emulated/0/Download//report.pdf"
+                )),
+            ]))
+        ),
+        Some(DexExecutionResult::Void)
+    );
+    assert_eq!(
+        program.read_stored_instance_field(&file, &path_field),
+        Some(DexValue::String(std::rc::Rc::from(
+            "/storage/emulated/0/Download/report.pdf"
+        )))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&get_absolute_path, Some(&test_invocation(vec![file]))),
+        Some(DexExecutionResult::Value(DexValue::String(
+            std::rc::Rc::from("/storage/emulated/0/Download/report.pdf")
+        )))
+    );
+}
+
+#[test]
+fn libcore_file_is_hidden_checks_leading_dot_in_name() {
+    // cite: libcore File.java#isHidden
+    // cite: libcore UnixFileSystem.java#getBooleanAttributes
+    let program = DexProgram::new(Vec::new());
+    let is_hidden = DexMethodId {
+        class_descriptor: "Ljava/io/File;".to_owned(),
+        name: "isHidden".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "Z".to_owned(),
+            return_type: "Z".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+    let hidden = file_value("/storage/emulated/0/.nomedia");
+    let visible = file_value("/storage/emulated/0/Download");
+
+    assert_eq!(
+        program.invoke_builtin_method(&is_hidden, Some(&test_invocation(vec![hidden]))),
+        Some(DexExecutionResult::Int(1))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&is_hidden, Some(&test_invocation(vec![visible]))),
+        Some(DexExecutionResult::Int(0))
+    );
+}
+
+#[test]
+fn libcore_file_get_name_returns_last_path_component() {
+    let program = DexProgram::new(Vec::new());
+    let get_name = DexMethodId {
+        class_descriptor: "Ljava/io/File;".to_owned(),
+        name: "getName".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "L".to_owned(),
+            return_type: "Ljava/lang/String;".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+    let reference = file_value("/data/user/0/com.example/files");
+    let object = DexValue::Object(DexObjectRef {
+        id: 1,
+        class_descriptor: std::rc::Rc::from("Ljava/io/File;"),
+    });
+    let path_field = DexFieldId {
+        class_descriptor: "Ljava/io/File;".to_owned(),
+        type_descriptor: "Ljava/lang/String;".to_owned(),
+        name: "path".to_owned(),
+    };
+
+    assert!(program.write_stored_instance_field(
+        &object,
+        &path_field,
+        DexValue::String(std::rc::Rc::from("/data/user/0/com.example/cache/room.db",)),
+    ));
+    assert_eq!(
+        program.invoke_builtin_method(&get_name, Some(&test_invocation(vec![reference]))),
+        Some(DexExecutionResult::Value(DexValue::String(
+            std::rc::Rc::from("files")
+        )))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&get_name, Some(&test_invocation(vec![object]))),
+        Some(DexExecutionResult::Value(DexValue::String(
+            std::rc::Rc::from("room.db")
+        )))
+    );
+}
+
+#[test]
+fn libcore_file_get_absolute_file_uses_android_root_for_relative_paths() {
+    let program = DexProgram::new(Vec::new());
+    let get_absolute_file = DexMethodId {
+        class_descriptor: "Ljava/io/File;".to_owned(),
+        name: "getAbsoluteFile".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "L".to_owned(),
+            return_type: "Ljava/io/File;".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+    let absolute = file_value("/data/user/0/com.example/files");
+    let relative = file_value("relative.db");
+
+    assert_eq!(
+        program.invoke_builtin_method(&get_absolute_file, Some(&test_invocation(vec![absolute]))),
+        Some(DexExecutionResult::Value(DexValue::Reference(
+            std::rc::Rc::from("Ljava/io/File;:/data/user/0/com.example/files")
+        )))
+    );
+
+    assert_eq!(
+        program.invoke_builtin_method(&get_absolute_file, Some(&test_invocation(vec![relative]))),
+        Some(DexExecutionResult::Value(DexValue::Reference(
+            std::rc::Rc::from("Ljava/io/File;:/relative.db")
+        )))
+    );
+}
+
+#[test]
+fn libcore_file_get_absolute_path_never_exposes_the_host_working_directory() {
+    let program = DexProgram::new(Vec::new());
+    let get_absolute_path = DexMethodId {
+        class_descriptor: "Ljava/io/File;".to_owned(),
+        name: "getAbsolutePath".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "L".to_owned(),
+            return_type: "Ljava/lang/String;".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+    let relative = file_value("relative.db");
+
+    assert_eq!(
+        program.invoke_builtin_method(&get_absolute_path, Some(&test_invocation(vec![relative]))),
+        Some(DexExecutionResult::Value(DexValue::String(
+            std::rc::Rc::from("/relative.db")
+        )))
+    );
+}
+
+#[test]
+fn libcore_file_get_canonical_file_returns_only_a_guest_path() {
+    let fixture = GuestIoFixture::new("canonical");
+    fs::create_dir_all(fixture.private.join("cache"))
+        .expect("canonical test directory should exist");
+    let program = fixture.program();
+    let get_canonical_file = DexMethodId {
+        class_descriptor: "Ljava/io/File;".to_owned(),
+        name: "getCanonicalFile".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "L".to_owned(),
+            return_type: "Ljava/io/File;".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+    let file = file_value("/data/user/0/com.example/files/../cache");
+    let missing_file = file_value("/data/user/0/com.example/files/../cache/missing.db");
+
+    assert_eq!(
+        program.invoke_builtin_method(&get_canonical_file, Some(&test_invocation(vec![file]))),
+        Some(DexExecutionResult::Value(DexValue::Reference(
+            std::rc::Rc::from("Ljava/io/File;:/data/user/0/com.example/cache")
+        )))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(
+            &get_canonical_file,
+            Some(&test_invocation(vec![missing_file]))
+        ),
+        Some(DexExecutionResult::Value(DexValue::Reference(
+            std::rc::Rc::from("Ljava/io/File;:/data/user/0/com.example/cache/missing.db")
+        )))
+    );
+}
+
+#[test]
+fn builtin_stat_fs_reports_positive_volume_stats_for_a_guest_path() {
+    // cite: frameworks-base StatFs.java#StatFs, getBlockSizeLong, getBlockCountLong
+    let fixture = GuestIoFixture::new("statfs");
+    let program = fixture.program();
+    let constructor = DexMethodId {
+        class_descriptor: "Landroid/os/StatFs;".to_owned(),
+        name: "<init>".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "VL".to_owned(),
+            return_type: "V".to_owned(),
+            parameters: vec!["Ljava/lang/String;".to_owned()],
+        },
+    };
+    let stat_fs = DexValue::Object(DexObjectRef {
+        id: 1,
+        class_descriptor: std::rc::Rc::from("Landroid/os/StatFs;"),
+    });
+
+    assert_eq!(
+        program.invoke_builtin_method(
+            &constructor,
+            Some(&test_invocation(vec![
+                stat_fs.clone(),
+                DexValue::String(std::rc::Rc::from("/data/user/0/com.example/files")),
+            ]))
+        ),
+        Some(DexExecutionResult::Void)
+    );
+
+    let getters = [
+        "getBlockSizeLong",
+        "getBlockCountLong",
+        "getFreeBlocksLong",
+        "getFreeBytes",
+        "getAvailableBlocksLong",
+        "getAvailableBytes",
+        "getTotalBytes",
+    ];
+    for name in getters {
+        let method = DexMethodId {
+            class_descriptor: "Landroid/os/StatFs;".to_owned(),
+            name: name.to_owned(),
+            proto: crate::dex::DexProto {
+                shorty: "J".to_owned(),
+                return_type: "J".to_owned(),
+                parameters: Vec::new(),
+            },
+        };
+        let Some(DexExecutionResult::Value(DexValue::Long(value))) =
+            program.invoke_builtin_method(&method, Some(&test_invocation(vec![stat_fs.clone()])))
+        else {
+            panic!("{name} should return a long value");
+        };
+        assert!(value > 0, "{name} should be positive, got {value}");
+    }
+}
+
+#[test]
+fn builtin_stat_fs_constructor_throws_for_a_path_outside_the_guest_mount() {
+    // cite: frameworks-base StatFs.java#StatFs
+    let fixture = GuestIoFixture::new("statfs_invalid");
+    let program = fixture.program();
+    let constructor = DexMethodId {
+        class_descriptor: "Landroid/os/StatFs;".to_owned(),
+        name: "<init>".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "VL".to_owned(),
+            return_type: "V".to_owned(),
+            parameters: vec!["Ljava/lang/String;".to_owned()],
+        },
+    };
+    let stat_fs = DexValue::Object(DexObjectRef {
+        id: 1,
+        class_descriptor: std::rc::Rc::from("Landroid/os/StatFs;"),
+    });
+
+    let Some(DexExecutionResult::Throw(exception)) = program.invoke_builtin_method(
+        &constructor,
+        Some(&test_invocation(vec![
+            stat_fs,
+            DexValue::String(std::rc::Rc::from("/etc/passwd")),
+        ])),
+    ) else {
+        panic!("StatFs(String) should throw for a path outside the guest mount");
+    };
+    assert_eq!(
+        value_class_descriptor(&exception),
+        Some("Ljava/lang/IllegalArgumentException;")
+    );
+}
+
+#[test]
+fn libcore_file_mkdirs_creates_only_inside_the_guest_mount() {
+    let fixture = GuestIoFixture::new("mkdirs");
+    let program = fixture.program();
+    let mkdirs = DexMethodId {
+        class_descriptor: "Ljava/io/File;".to_owned(),
+        name: "mkdirs".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "Z".to_owned(),
+            return_type: "Z".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+    let is_directory = DexMethodId {
+        class_descriptor: "Ljava/io/File;".to_owned(),
+        name: "isDirectory".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "Z".to_owned(),
+            return_type: "Z".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+    let path = fixture.private.join("files/nested");
+    let file = file_value("/data/user/0/com.example/files/nested");
+
+    assert_eq!(
+        program.invoke_builtin_method(&mkdirs, Some(&test_invocation(vec![file.clone()]))),
+        Some(DexExecutionResult::Int(1))
+    );
+    assert!(path.is_dir());
+    assert_eq!(
+        program.invoke_builtin_method(&is_directory, Some(&test_invocation(vec![file]))),
+        Some(DexExecutionResult::Int(1))
+    );
+}
+
+#[test]
+fn libcore_file_exists_reports_guest_filesystem_presence() {
+    let fixture = GuestIoFixture::new("exists");
+    let program = fixture.program();
+    let exists = DexMethodId {
+        class_descriptor: "Ljava/io/File;".to_owned(),
+        name: "exists".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "Z".to_owned(),
+            return_type: "Z".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+    let path = fixture.private.join("files/preferences.preferences_pb");
+    let file = file_value("/data/user/0/com.example/files/preferences.preferences_pb");
+
+    assert_eq!(
+        program.invoke_builtin_method(&exists, Some(&test_invocation(vec![file.clone()]))),
+        Some(DexExecutionResult::Int(0))
+    );
+
+    fs::create_dir_all(path.parent().expect("test path should have a parent"))
+        .expect("exists test directory should be created");
+    fs::write(&path, b"datastore").expect("exists test file should be written");
+
+    assert_eq!(
+        program.invoke_builtin_method(&exists, Some(&test_invocation(vec![file]))),
+        Some(DexExecutionResult::Int(1))
+    );
+}
+
+// cite: frameworks-base AndroidManifest.xml#READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE
+// cite: frameworks-base Environment.java#isExternalStorageLegacy
+#[test]
+fn aosp_legacy_external_storage_read_and_write_grants_remain_independent_in_java_io() {
+    let fixture = GuestIoFixture::new("legacy_external_access_modes");
+    let directory = fixture.shared.join("Documents");
+    fs::create_dir_all(&directory).expect("public documents directory should exist");
+    fs::write(directory.join("readable.txt"), b"readable").expect("public test file should exist");
+    let exists = java_io_method("Ljava/io/File;", "exists", "Z", &[]);
+    let input = java_io_method(
+        "Ljava/io/FileInputStream;",
+        "<init>",
+        "V",
+        &["Ljava/io/File;"],
+    );
+    let output = java_io_method(
+        "Ljava/io/FileOutputStream;",
+        "<init>",
+        "V",
+        &["Ljava/io/File;"],
+    );
+    let readable_file = file_value("/storage/emulated/0/Documents/readable.txt");
+    let writable_file = file_value("/storage/emulated/0/Documents/writable.txt");
+
+    let read_policy = ExternalStoragePolicy::new(
+        28,
+        28,
+        vec![READ_EXTERNAL_STORAGE.to_owned()],
+        ExternalStorageRuntimeAccess::with_legacy_file_access(
+            vec![READ_EXTERNAL_STORAGE.to_owned()],
+            true,
+            true,
+            false,
+        ),
+    );
+    let read_program = fixture.program_with_external_storage_policy(read_policy);
+    assert_eq!(
+        read_program
+            .invoke_builtin_method(&exists, Some(&test_invocation(vec![readable_file.clone()])),),
+        Some(DexExecutionResult::Int(1))
+    );
+    assert_eq!(
+        read_program.invoke_builtin_method(
+            &input,
+            Some(&test_invocation(vec![
+                object_value(301, "Ljava/io/FileInputStream;"),
+                readable_file.clone(),
+            ])),
+        ),
+        Some(DexExecutionResult::Void)
+    );
+    assert!(matches!(
+        read_program.invoke_builtin_method(
+            &output,
+            Some(&test_invocation(vec![
+                object_value(302, "Ljava/io/FileOutputStream;"),
+                writable_file.clone(),
+            ])),
+        ),
+        Some(DexExecutionResult::Throw(_))
+    ));
+    assert!(!directory.join("writable.txt").exists());
+
+    let write_policy = ExternalStoragePolicy::new(
+        28,
+        28,
+        vec![WRITE_EXTERNAL_STORAGE.to_owned()],
+        ExternalStorageRuntimeAccess::with_legacy_file_access(
+            vec![WRITE_EXTERNAL_STORAGE.to_owned()],
+            true,
+            false,
+            true,
+        ),
+    );
+    let write_program = fixture.program_with_external_storage_policy(write_policy);
+    assert_eq!(
+        write_program
+            .invoke_builtin_method(&exists, Some(&test_invocation(vec![readable_file.clone()])),),
+        Some(DexExecutionResult::Int(0))
+    );
+    assert!(matches!(
+        write_program.invoke_builtin_method(
+            &input,
+            Some(&test_invocation(vec![
+                object_value(303, "Ljava/io/FileInputStream;"),
+                readable_file,
+            ])),
+        ),
+        Some(DexExecutionResult::Throw(_))
+    ));
+    assert_eq!(
+        write_program.invoke_builtin_method(
+            &output,
+            Some(&test_invocation(vec![
+                object_value(304, "Ljava/io/FileOutputStream;"),
+                writable_file,
+            ])),
+        ),
+        Some(DexExecutionResult::Void)
+    );
+    assert!(directory.join("writable.txt").is_file());
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_filesystem_check_access_uses_read_and_write_modes() {
+    use std::os::unix::fs::PermissionsExt;
+
+    if unsafe { libc::geteuid() } == 0 {
+        return;
+    }
+
+    let fixture = GuestIoFixture::new("access_modes");
+    fs::create_dir_all(fixture.private.join("files")).expect("guest files directory should exist");
+    let host_path = fixture.private.join("files/mode.txt");
+    fs::write(&host_path, b"mode").expect("guest file should exist");
+    let file = file_value("/data/user/0/com.example/files/mode.txt");
+    let program = fixture.program();
+    let can_read = java_io_method("Ljava/io/File;", "canRead", "Z", &[]);
+    let can_write = java_io_method("Ljava/io/File;", "canWrite", "Z", &[]);
+
+    fs::set_permissions(&host_path, fs::Permissions::from_mode(0o200))
+        .expect("write-only permissions should apply");
+    assert_eq!(
+        program.invoke_builtin_method(&can_read, Some(&test_invocation(vec![file.clone()]))),
+        Some(DexExecutionResult::Int(0))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&can_write, Some(&test_invocation(vec![file.clone()]))),
+        Some(DexExecutionResult::Int(1))
+    );
+
+    fs::set_permissions(&host_path, fs::Permissions::from_mode(0o400))
+        .expect("read-only permissions should apply");
+    assert_eq!(
+        program.invoke_builtin_method(&can_read, Some(&test_invocation(vec![file.clone()]))),
+        Some(DexExecutionResult::Int(1))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&can_write, Some(&test_invocation(vec![file]))),
+        Some(DexExecutionResult::Int(0))
+    );
+}
+
+#[test]
+fn libcore_file_output_stream_opens_a_guest_file_and_stores_its_guest_path() {
+    let fixture = GuestIoFixture::new("output_stream");
+    let program = fixture.program();
+    let constructor = DexMethodId {
+        class_descriptor: "Ljava/io/FileOutputStream;".to_owned(),
+        name: "<init>".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "VL".to_owned(),
+            return_type: "V".to_owned(),
+            parameters: vec!["Ljava/io/File;".to_owned()],
+        },
+    };
+    let get_channel = DexMethodId {
+        class_descriptor: "Ljava/io/FileOutputStream;".to_owned(),
+        name: "getChannel".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "L".to_owned(),
+            return_type: "Ljava/nio/channels/FileChannel;".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+    let lock = DexMethodId {
+        class_descriptor: "Ljava/nio/channels/FileChannel;".to_owned(),
+        name: "lock".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "L".to_owned(),
+            return_type: "Ljava/nio/channels/FileLock;".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+    let close_channel = DexMethodId {
+        class_descriptor: "Ljava/nio/channels/spi/AbstractInterruptibleChannel;".to_owned(),
+        name: "close".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "V".to_owned(),
+            return_type: "V".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+    let path = fixture.private.join("files/out.db");
+    fs::create_dir_all(path.parent().expect("test path should have a parent"))
+        .expect("output stream parent should exist");
+    let guest_path = "/data/user/0/com.example/files/out.db";
+    let stream = DexValue::Object(DexObjectRef {
+        id: 2,
+        class_descriptor: std::rc::Rc::from("Ljava/io/FileOutputStream;"),
+    });
+    let file = file_value(guest_path);
+    let path_field = DexFieldId {
+        class_descriptor: "Ljava/io/FileOutputStream;".to_owned(),
+        type_descriptor: "Ljava/lang/String;".to_owned(),
+        name: "path".to_owned(),
+    };
+
+    assert_eq!(
+        program.invoke_builtin_method(
+            &constructor,
+            Some(&test_invocation(vec![stream.clone(), file]))
+        ),
+        Some(DexExecutionResult::Void)
+    );
+    assert!(path.is_file());
+    assert_eq!(
+        program.read_stored_instance_field(&stream, &path_field),
+        Some(DexValue::String(std::rc::Rc::from(guest_path)))
+    );
+    let channel = DexValue::Reference(std::rc::Rc::from(format!(
+        "Ljava/nio/channels/FileChannel;:{guest_path}"
+    )));
+    assert_eq!(
+        program.invoke_builtin_method(&get_channel, Some(&test_invocation(vec![stream]))),
+        Some(DexExecutionResult::Value(channel.clone()))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&lock, Some(&test_invocation(vec![channel.clone()]))),
+        Some(DexExecutionResult::Value(DexValue::Reference(
+            std::rc::Rc::from(format!("Ljava/nio/channels/FileLock;:{guest_path}"))
+        )))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&close_channel, Some(&test_invocation(vec![channel]))),
+        Some(DexExecutionResult::Void)
+    );
+}
+
+#[test]
+fn libcore_file_input_stream_opens_a_guest_file_and_stores_its_guest_path() {
+    let fixture = GuestIoFixture::new("input_stream");
+    let program = fixture.program();
+    let constructor = DexMethodId {
+        class_descriptor: "Ljava/io/FileInputStream;".to_owned(),
+        name: "<init>".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "VL".to_owned(),
+            return_type: "V".to_owned(),
+            parameters: vec!["Ljava/io/File;".to_owned()],
+        },
+    };
+    let path = fixture.private.join("files/preferences.preferences_pb");
+    fs::create_dir_all(path.parent().expect("test file should have a parent"))
+        .expect("test input stream directory should be created");
+    fs::write(&path, b"datastore").expect("test input stream file should be written");
+
+    let stream = DexValue::Object(DexObjectRef {
+        id: 42,
+        class_descriptor: std::rc::Rc::from("Ljava/io/FileInputStream;"),
+    });
+    let guest_path = "/data/user/0/com.example/files/preferences.preferences_pb";
+    let file = file_value(guest_path);
+    let path_field = DexFieldId {
+        class_descriptor: "Ljava/io/FileInputStream;".to_owned(),
+        type_descriptor: "Ljava/lang/String;".to_owned(),
+        name: "path".to_owned(),
+    };
+
+    assert_eq!(
+        program.invoke_builtin_method(
+            &constructor,
+            Some(&test_invocation(vec![stream.clone(), file]))
+        ),
+        Some(DexExecutionResult::Void)
+    );
+    assert_eq!(
+        program.read_stored_instance_field(&stream, &path_field),
+        Some(DexValue::String(std::rc::Rc::from(guest_path)))
+    );
+}
+
+#[test]
+fn libcore_file_input_stream_throws_for_a_missing_guest_file() {
+    let fixture = GuestIoFixture::new("missing_input");
+    let program = fixture.program();
+    let constructor = DexMethodId {
+        class_descriptor: "Ljava/io/FileInputStream;".to_owned(),
+        name: "<init>".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "VL".to_owned(),
+            return_type: "V".to_owned(),
+            parameters: vec!["Ljava/io/File;".to_owned()],
+        },
+    };
+    let guest_path = "/data/user/0/com.example/files/missing.preferences_pb";
+
+    let stream = DexValue::Object(DexObjectRef {
+        id: 43,
+        class_descriptor: std::rc::Rc::from("Ljava/io/FileInputStream;"),
+    });
+    let file = file_value(guest_path);
+    let message_field = DexFieldId {
+        class_descriptor: "Ljava/lang/Throwable;".to_owned(),
+        type_descriptor: "Ljava/lang/String;".to_owned(),
+        name: "detailMessage".to_owned(),
+    };
+
+    let Some(DexExecutionResult::Throw(exception)) =
+        program.invoke_builtin_method(&constructor, Some(&test_invocation(vec![stream, file])))
+    else {
+        panic!("missing file should throw FileNotFoundException");
+    };
+
+    assert!(program.value_matches_type(&exception, "Ljava/io/FileNotFoundException;"));
+    assert!(program.value_matches_type(&exception, "Ljava/io/IOException;"));
+    assert!(program.value_matches_type(&exception, "Ljava/lang/Exception;"));
+    let Some(DexValue::String(message)) =
+        program.read_stored_instance_field(&exception, &message_field)
+    else {
+        panic!("FileNotFoundException should contain a detail message");
+    };
+    assert!(message.starts_with(guest_path));
+    assert!(message.contains("No such file or directory"));
+}
+
+#[test]
+fn libcore_file_list_files_returns_guest_paths_instead_of_host_paths() {
+    let fixture = GuestIoFixture::new("list_files");
+    let directory = fixture.private.join("files");
+    fs::create_dir_all(&directory).expect("guest directory should exist");
+    fs::write(directory.join("entry.txt"), b"entry").expect("guest file should exist");
+    let program = fixture.program();
+    let list_files = java_io_method("Ljava/io/File;", "listFiles", "[Ljava/io/File;", &[]);
+
+    let Some(DexExecutionResult::Value(array)) = program.invoke_builtin_method(
+        &list_files,
+        Some(&test_invocation(vec![file_value(
+            "/data/user/0/com.example/files",
+        )])),
+    ) else {
+        panic!("listFiles should return a guest array");
+    };
+
+    assert_eq!(
+        program.read_array_value(&array, 0),
+        Some(file_value("/data/user/0/com.example/files/entry.txt"))
+    );
+}
+
+#[test]
+fn environment_sdcard_alias_and_primary_path_share_a_rename_mount() {
+    let fixture = GuestIoFixture::new("shared_rename");
+    let directory = fixture.shared.join("Android/data/com.example/files");
+    fs::create_dir_all(&directory).expect("app external directory should exist");
+    fs::write(directory.join("source.txt"), b"source").expect("shared source should exist");
+    let program = fixture.program();
+    let rename = java_io_method("Ljava/io/File;", "renameTo", "Z", &["Ljava/io/File;"]);
+
+    assert_eq!(
+        program.invoke_builtin_method(
+            &rename,
+            Some(&test_invocation(vec![
+                file_value("/sdcard/Android/data/com.example/files/source.txt"),
+                file_value("/storage/emulated/0/Android/data/com.example/files/destination.txt",),
+            ])),
+        ),
+        Some(DexExecutionResult::Int(1))
+    );
+    assert_eq!(
+        fs::read(directory.join("destination.txt")).expect("renamed shared file should exist"),
+        b"source"
+    );
+}
+
+#[test]
+fn libcore_file_dot_components_preserve_os_resolution_failures() {
+    let fixture = GuestIoFixture::new("dot_resolution");
+    fs::create_dir_all(fixture.private.join("files")).expect("guest files directory should exist");
+    let victim = fixture.private.join("files/victim.txt");
+    fs::write(&victim, b"victim").expect("victim should exist");
+    fs::write(fixture.private.join("files/regular"), b"regular")
+        .expect("regular component should exist");
+    let program = fixture.program();
+    let delete = java_io_method("Ljava/io/File;", "delete", "Z", &[]);
+    let output = java_io_method(
+        "Ljava/io/FileOutputStream;",
+        "<init>",
+        "V",
+        &["Ljava/io/File;"],
+    );
+
+    for path in [
+        "/data/user/0/com.example/files/missing/../victim.txt",
+        "/data/user/0/com.example/files/regular/../victim.txt",
+    ] {
+        assert_eq!(
+            program.invoke_builtin_method(&delete, Some(&test_invocation(vec![file_value(path)])),),
+            Some(DexExecutionResult::Int(0))
+        );
+        assert!(matches!(
+            program.invoke_builtin_method(
+                &output,
+                Some(&test_invocation(vec![
+                    object_value(200, "Ljava/io/FileOutputStream;"),
+                    file_value(path),
+                ])),
+            ),
+            Some(DexExecutionResult::Throw(_))
+        ));
+        assert_eq!(fs::read(&victim).expect("victim should remain"), b"victim");
+    }
+}
+
+#[test]
+fn guest_mount_roots_cannot_be_deleted_or_renamed() {
+    let fixture = GuestIoFixture::new("mount_roots");
+    let program = fixture.program();
+    let delete = java_io_method("Ljava/io/File;", "delete", "Z", &[]);
+    let rename = java_io_method("Ljava/io/File;", "renameTo", "Z", &["Ljava/io/File;"]);
+
+    for path in [
+        "/data/user/0/com.example",
+        "/data/user_de/0/com.example",
+        "/storage/emulated/0",
+        "/sdcard",
+    ] {
+        assert_eq!(
+            program.invoke_builtin_method(&delete, Some(&test_invocation(vec![file_value(path)])),),
+            Some(DexExecutionResult::Int(0))
+        );
+    }
+    assert_eq!(
+        program.invoke_builtin_method(
+            &rename,
+            Some(&test_invocation(vec![
+                file_value("/data/user/0/com.example"),
+                file_value("/storage/emulated/0/moved-private"),
+            ])),
+        ),
+        Some(DexExecutionResult::Int(0))
+    );
+    assert!(fixture.private.is_dir());
+    assert!(fixture.device_private.is_dir());
+    assert!(fixture.shared.is_dir());
+    assert!(!fixture.shared.join("moved-private").exists());
+}
+
+#[test]
+fn android_external_privacy_ancestor_cannot_be_renamed() {
+    let fixture = GuestIoFixture::new("android_privacy_root");
+    fs::create_dir_all(fixture.shared.join("Android/data/com.other/files"))
+        .expect("other app directory should exist on the host");
+    fs::write(
+        fixture
+            .shared
+            .join("Android/data/com.other/files/secret.txt"),
+        b"secret",
+    )
+    .expect("other app file should exist on the host");
+    let program = fixture.program();
+    let rename = java_io_method("Ljava/io/File;", "renameTo", "Z", &["Ljava/io/File;"]);
+    let exists = java_io_method("Ljava/io/File;", "exists", "Z", &[]);
+
+    assert_eq!(
+        program.invoke_builtin_method(
+            &rename,
+            Some(&test_invocation(vec![
+                file_value("/storage/emulated/0/Android"),
+                file_value("/storage/emulated/0/moved"),
+            ])),
+        ),
+        Some(DexExecutionResult::Int(0))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(
+            &exists,
+            Some(&test_invocation(vec![file_value(
+                "/storage/emulated/0/moved/data/com.other/files/secret.txt",
+            )])),
+        ),
+        Some(DexExecutionResult::Int(0))
+    );
+    assert!(fixture.shared.join("Android").is_dir());
+    assert!(!fixture.shared.join("moved").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn guest_filesystem_boundary_blocks_host_and_symlink_entrypoints() {
+    let fixture = GuestIoFixture::new("boundary");
+    let outside = fixture.root.join("outside");
+    fs::create_dir_all(&outside).expect("outside directory should exist");
+    let secret = outside.join("secret.txt");
+    fs::write(&secret, b"unchanged").expect("outside file should exist");
+    fs::create_dir_all(fixture.private.join("files")).expect("guest files directory should exist");
+    std::os::unix::fs::symlink(&outside, fixture.private.join("files/escape"))
+        .expect("test symlink should exist");
+    let source = fixture.private.join("files/source.txt");
+    fs::write(&source, b"source").expect("rename source should exist");
+    let program = fixture.program();
+    let direct_host = file_value(&secret.to_string_lossy());
+    let escaped = file_value("/data/user/0/com.example/files/escape/secret.txt");
+    let other_app = file_value("/data/user/0/com.other/files/secret.txt");
+
+    let exists = java_io_method("Ljava/io/File;", "exists", "Z", &[]);
+    let length = java_io_method("Ljava/io/File;", "length", "J", &[]);
+    let list_files = java_io_method("Ljava/io/File;", "listFiles", "[Ljava/io/File;", &[]);
+    let delete = java_io_method("Ljava/io/File;", "delete", "Z", &[]);
+    let rename = java_io_method("Ljava/io/File;", "renameTo", "Z", &["Ljava/io/File;"]);
+    let input = java_io_method(
+        "Ljava/io/FileInputStream;",
+        "<init>",
+        "V",
+        &["Ljava/io/File;"],
+    );
+    let reader = java_io_method("Ljava/io/FileReader;", "<init>", "V", &["Ljava/io/File;"]);
+    let output = java_io_method(
+        "Ljava/io/FileOutputStream;",
+        "<init>",
+        "V",
+        &["Ljava/io/File;"],
+    );
+    let writer = java_io_method("Ljava/io/FileWriter;", "<init>", "V", &["Ljava/io/File;"]);
+
+    for file in [direct_host.clone(), escaped.clone(), other_app] {
+        assert_eq!(
+            program.invoke_builtin_method(&exists, Some(&test_invocation(vec![file.clone()]))),
+            Some(DexExecutionResult::Int(0))
+        );
+        assert_eq!(
+            program.invoke_builtin_method(&length, Some(&test_invocation(vec![file.clone()]))),
+            Some(DexExecutionResult::Value(DexValue::Long(0)))
+        );
+        assert_eq!(
+            program.invoke_builtin_method(&delete, Some(&test_invocation(vec![file.clone()]))),
+            Some(DexExecutionResult::Int(0))
+        );
+        assert_eq!(
+            program.invoke_builtin_method(&list_files, Some(&test_invocation(vec![file]))),
+            Some(DexExecutionResult::Value(DexValue::Null))
+        );
+    }
+    assert_eq!(
+        program.invoke_builtin_method(
+            &list_files,
+            Some(&test_invocation(vec![file_value(
+                &outside.to_string_lossy()
+            )])),
+        ),
+        Some(DexExecutionResult::Value(DexValue::Null))
+    );
+
+    for (path_index, file) in [direct_host, escaped.clone()].into_iter().enumerate() {
+        for (method, class, id) in [
+            (&input, "Ljava/io/FileInputStream;", 100),
+            (&reader, "Ljava/io/FileReader;", 101),
+            (&output, "Ljava/io/FileOutputStream;", 102),
+            (&writer, "Ljava/io/FileWriter;", 103),
+        ] {
+            assert!(matches!(
+                program.invoke_builtin_method(
+                    method,
+                    Some(&test_invocation(vec![
+                        object_value(id + path_index as u64 * 10, class),
+                        file.clone()
+                    ])),
+                ),
+                Some(DexExecutionResult::Throw(_))
+            ));
+        }
+    }
+
+    assert_eq!(
+        program.invoke_builtin_method(
+            &rename,
+            Some(&test_invocation(vec![
+                file_value("/data/user/0/com.example/files/source.txt"),
+                file_value("/data/user/0/com.example/files/escape/moved.txt"),
+            ])),
+        ),
+        Some(DexExecutionResult::Int(0))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(
+            &rename,
+            Some(&test_invocation(vec![
+                file_value("/data/user/0/com.example/files/source.txt"),
+                file_value("/storage/emulated/0/moved.txt"),
+            ])),
+        ),
+        Some(DexExecutionResult::Int(0))
+    );
+
+    assert_eq!(
+        fs::read(&secret).expect("outside file should remain"),
+        b"unchanged"
+    );
+    assert!(source.is_file());
+    assert!(!outside.join("moved.txt").exists());
+    assert!(!fixture.shared.join("moved.txt").exists());
+}
+
+#[test]
+fn builtin_output_stream_constructors_return_void() {
+    let program = DexProgram::new(Vec::new());
+    let byte_array_output_stream = DexMethodId {
+        class_descriptor: "Ljava/io/ByteArrayOutputStream;".to_owned(),
+        name: "<init>".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "V".to_owned(),
+            return_type: "V".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+    let data_output_stream = DexMethodId {
+        class_descriptor: "Ljava/io/DataOutputStream;".to_owned(),
+        name: "<init>".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "VL".to_owned(),
+            return_type: "V".to_owned(),
+            parameters: vec!["Ljava/io/OutputStream;".to_owned()],
+        },
+    };
+
+    assert_eq!(
+        program.invoke_builtin_method(&byte_array_output_stream, None),
+        Some(DexExecutionResult::Void)
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&data_output_stream, None),
+        Some(DexExecutionResult::Void)
+    );
+}
+
+#[test]
+fn builtin_string_writer_buffers_writes_and_appends() {
+    let program = DexProgram::new(Vec::new());
+    let constructor = DexMethodId {
+        class_descriptor: "Ljava/io/StringWriter;".to_owned(),
+        name: "<init>".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "V".to_owned(),
+            return_type: "V".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+    let write_string = DexMethodId {
+        class_descriptor: "Ljava/io/StringWriter;".to_owned(),
+        name: "write".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "VL".to_owned(),
+            return_type: "V".to_owned(),
+            parameters: vec!["Ljava/lang/String;".to_owned()],
+        },
+    };
+    let write_range = DexMethodId {
+        class_descriptor: "Ljava/io/StringWriter;".to_owned(),
+        name: "write".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "VLII".to_owned(),
+            return_type: "V".to_owned(),
+            parameters: vec![
+                "Ljava/lang/String;".to_owned(),
+                "I".to_owned(),
+                "I".to_owned(),
+            ],
+        },
+    };
+    let append_char = DexMethodId {
+        class_descriptor: "Ljava/io/StringWriter;".to_owned(),
+        name: "append".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "LC".to_owned(),
+            return_type: "Ljava/io/StringWriter;".to_owned(),
+            parameters: vec!["C".to_owned()],
+        },
+    };
+    let append_range = DexMethodId {
+        class_descriptor: "Ljava/io/StringWriter;".to_owned(),
+        name: "append".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "LLII".to_owned(),
+            return_type: "Ljava/io/StringWriter;".to_owned(),
+            parameters: vec![
+                "Ljava/lang/CharSequence;".to_owned(),
+                "I".to_owned(),
+                "I".to_owned(),
+            ],
+        },
+    };
+    let writer_write_char = DexMethodId {
+        class_descriptor: "Ljava/io/Writer;".to_owned(),
+        name: "write".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "VI".to_owned(),
+            return_type: "V".to_owned(),
+            parameters: vec!["I".to_owned()],
+        },
+    };
+    let writer_append_char = DexMethodId {
+        class_descriptor: "Ljava/io/Writer;".to_owned(),
+        name: "append".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "LC".to_owned(),
+            return_type: "Ljava/io/Writer;".to_owned(),
+            parameters: vec!["C".to_owned()],
+        },
+    };
+    let writer_close = DexMethodId {
+        class_descriptor: "Ljava/io/Writer;".to_owned(),
+        name: "close".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "V".to_owned(),
+            return_type: "V".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+    let to_string = DexMethodId {
+        class_descriptor: "Ljava/io/StringWriter;".to_owned(),
+        name: "toString".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "L".to_owned(),
+            return_type: "Ljava/lang/String;".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+    let writer = DexValue::Object(DexObjectRef {
+        id: 17,
+        class_descriptor: std::rc::Rc::from("Ljava/io/StringWriter;"),
+    });
+
+    assert_eq!(
+        program.invoke_builtin_method(&constructor, Some(&test_invocation(vec![writer.clone()]))),
+        Some(DexExecutionResult::Void)
+    );
+    assert_eq!(
+        program.invoke_builtin_method(
+            &write_string,
+            Some(&test_invocation(vec![
+                writer.clone(),
+                DexValue::String(std::rc::Rc::from("alpha"))
+            ]))
+        ),
+        Some(DexExecutionResult::Void)
+    );
+    assert_eq!(
+        program.invoke_builtin_method(
+            &write_range,
+            Some(&test_invocation(vec![
+                writer.clone(),
+                DexValue::String(std::rc::Rc::from("abcdef")),
+                DexValue::Int(2),
+                DexValue::Int(3)
+            ]))
+        ),
+        Some(DexExecutionResult::Void)
+    );
+    assert_eq!(
+        program.invoke_builtin_method(
+            &append_char,
+            Some(&test_invocation(vec![
+                writer.clone(),
+                DexValue::Int('!' as i32)
+            ]))
+        ),
+        Some(DexExecutionResult::Value(writer.clone()))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(
+            &append_range,
+            Some(&test_invocation(vec![
+                writer.clone(),
+                DexValue::String(std::rc::Rc::from("a😀z")),
+                DexValue::Int(1),
+                DexValue::Int(3)
+            ]))
+        ),
+        Some(DexExecutionResult::Value(writer.clone()))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(
+            &writer_write_char,
+            Some(&test_invocation(vec![
+                writer.clone(),
+                DexValue::Int('[' as i32)
+            ]))
+        ),
+        Some(DexExecutionResult::Void)
+    );
+    assert_eq!(
+        program.invoke_builtin_method(
+            &writer_append_char,
+            Some(&test_invocation(vec![
+                writer.clone(),
+                DexValue::Int(']' as i32)
+            ]))
+        ),
+        Some(DexExecutionResult::Value(writer.clone()))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&writer_close, Some(&test_invocation(vec![writer.clone()]))),
+        Some(DexExecutionResult::Void)
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&to_string, Some(&test_invocation(vec![writer]))),
+        Some(DexExecutionResult::Value(DexValue::String(
+            std::rc::Rc::from("alphacde!😀[]")
+        )))
+    );
+}
+
+#[test]
+fn builtin_string_reader_reads_utf16_units_into_char_arrays() {
+    let program = DexProgram::new(Vec::new());
+    let constructor = DexMethodId {
+        class_descriptor: "Ljava/io/StringReader;".to_owned(),
+        name: "<init>".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "VL".to_owned(),
+            return_type: "V".to_owned(),
+            parameters: vec!["Ljava/lang/String;".to_owned()],
+        },
+    };
+    let read_char = DexMethodId {
+        class_descriptor: "Ljava/io/StringReader;".to_owned(),
+        name: "read".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "I".to_owned(),
+            return_type: "I".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+    let reader_read_buffer = DexMethodId {
+        class_descriptor: "Ljava/io/Reader;".to_owned(),
+        name: "read".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "ILII".to_owned(),
+            return_type: "I".to_owned(),
+            parameters: vec!["[C".to_owned(), "I".to_owned(), "I".to_owned()],
+        },
+    };
+    let close = DexMethodId {
+        class_descriptor: "Ljava/io/Reader;".to_owned(),
+        name: "close".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "V".to_owned(),
+            return_type: "V".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+    let reader = DexValue::Object(DexObjectRef {
+        id: 17,
+        class_descriptor: std::rc::Rc::from("Ljava/io/StringReader;"),
+    });
+    let array = program
+        .allocate_array("[C".to_owned(), 4)
+        .expect("char array should allocate");
+    let emoji_units: Vec<u16> = "\u{1f600}".encode_utf16().collect();
+
+    assert_eq!(
+        program.invoke_builtin_method(
+            &constructor,
+            Some(&test_invocation(vec![
+                reader.clone(),
+                DexValue::String(std::rc::Rc::from("a\u{1f600}b"))
+            ]))
+        ),
+        Some(DexExecutionResult::Void)
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&read_char, Some(&test_invocation(vec![reader.clone()]))),
+        Some(DexExecutionResult::Int('a' as i32))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(
+            &reader_read_buffer,
+            Some(&test_invocation(vec![
+                reader.clone(),
+                array.clone(),
+                DexValue::Int(1),
+                DexValue::Int(2)
+            ]))
+        ),
+        Some(DexExecutionResult::Int(2))
+    );
+    assert_eq!(
+        program.read_array_value(&array, 1),
+        Some(DexValue::Int(i32::from(emoji_units[0])))
+    );
+    assert_eq!(
+        program.read_array_value(&array, 2),
+        Some(DexValue::Int(i32::from(emoji_units[1])))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(
+            &reader_read_buffer,
+            Some(&test_invocation(vec![
+                reader.clone(),
+                array.clone(),
+                DexValue::Int(0),
+                DexValue::Int(4)
+            ]))
+        ),
+        Some(DexExecutionResult::Int(1))
+    );
+    assert_eq!(
+        program.read_array_value(&array, 0),
+        Some(DexValue::Int('b' as i32))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&read_char, Some(&test_invocation(vec![reader.clone()]))),
+        Some(DexExecutionResult::Int(-1))
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&close, Some(&test_invocation(vec![reader.clone()]))),
+        Some(DexExecutionResult::Void)
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&read_char, Some(&test_invocation(vec![reader]))),
+        None
+    );
+}
+
+#[test]
+fn builtin_data_output_stream_int_writes_return_void() {
+    let program = DexProgram::new(Vec::new());
+    let write_byte = DexMethodId {
+        class_descriptor: "Ljava/io/DataOutputStream;".to_owned(),
+        name: "writeByte".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "VI".to_owned(),
+            return_type: "V".to_owned(),
+            parameters: vec!["I".to_owned()],
+        },
+    };
+    let write_short = DexMethodId {
+        class_descriptor: "Ljava/io/DataOutputStream;".to_owned(),
+        name: "writeShort".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "VI".to_owned(),
+            return_type: "V".to_owned(),
+            parameters: vec!["I".to_owned()],
+        },
+    };
+    let write_int = DexMethodId {
+        class_descriptor: "Ljava/io/DataOutputStream;".to_owned(),
+        name: "writeInt".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "VI".to_owned(),
+            return_type: "V".to_owned(),
+            parameters: vec!["I".to_owned()],
+        },
+    };
+    let write_boolean = DexMethodId {
+        class_descriptor: "Ljava/io/DataOutputStream;".to_owned(),
+        name: "writeBoolean".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "VZ".to_owned(),
+            return_type: "V".to_owned(),
+            parameters: vec!["Z".to_owned()],
+        },
+    };
+    let write_utf = DexMethodId {
+        class_descriptor: "Ljava/io/DataOutputStream;".to_owned(),
+        name: "writeUTF".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "VL".to_owned(),
+            return_type: "V".to_owned(),
+            parameters: vec!["Ljava/lang/String;".to_owned()],
+        },
+    };
+    let flush = DexMethodId {
+        class_descriptor: "Ljava/io/DataOutputStream;".to_owned(),
+        name: "flush".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "V".to_owned(),
+            return_type: "V".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+    let size = DexMethodId {
+        class_descriptor: "Ljava/io/DataOutputStream;".to_owned(),
+        name: "size".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "I".to_owned(),
+            return_type: "I".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+    let int_invocation = test_invocation(vec![
+        DexValue::Reference(std::rc::Rc::from("stream")),
+        DexValue::Int(1),
+    ]);
+    let stream_invocation = test_invocation(vec![DexValue::Reference(std::rc::Rc::from("stream"))]);
+    let string_invocation = test_invocation(vec![
+        DexValue::Reference(std::rc::Rc::from("stream")),
+        DexValue::String(std::rc::Rc::from("isCompressed")),
+    ]);
+
+    assert_eq!(
+        program.invoke_builtin_method(&write_byte, Some(&int_invocation)),
+        Some(DexExecutionResult::Void)
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&write_short, Some(&int_invocation)),
+        Some(DexExecutionResult::Void)
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&write_int, Some(&int_invocation)),
+        Some(DexExecutionResult::Void)
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&write_boolean, Some(&int_invocation)),
+        Some(DexExecutionResult::Void)
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&write_utf, Some(&string_invocation)),
+        Some(DexExecutionResult::Void)
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&flush, Some(&stream_invocation)),
+        Some(DexExecutionResult::Void)
+    );
+    assert_eq!(
+        program.invoke_builtin_method(&size, Some(&stream_invocation)),
+        Some(DexExecutionResult::Int(0))
+    );
+}
+
+#[test]
+fn builtin_byte_array_output_stream_to_byte_array_returns_empty_byte_array() {
+    let program = DexProgram::new(Vec::new());
+    let method = DexMethodId {
+        class_descriptor: "Ljava/io/ByteArrayOutputStream;".to_owned(),
+        name: "toByteArray".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "L".to_owned(),
+            return_type: "[B".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+    let invocation = test_invocation(vec![DexValue::Reference(std::rc::Rc::from("stream"))]);
+    let expected = DexValue::Object(DexObjectRef {
+        id: 1,
+        class_descriptor: std::rc::Rc::from("[B"),
+    });
+
+    assert_eq!(
+        program.invoke_builtin_method(&method, Some(&invocation)),
+        Some(DexExecutionResult::Value(expected.clone()))
+    );
+    assert_eq!(
+        program
+            .runtime
+            .borrow()
+            .array_entries
+            .get(&map_identity_key(&expected)),
+        Some(&Vec::new())
+    );
+}
+
+#[test]
+fn builtin_closeable_close_returns_void() {
+    let program = DexProgram::new(Vec::new());
+    let method = DexMethodId {
+        class_descriptor: "Ljava/io/Closeable;".to_owned(),
+        name: "close".to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: "V".to_owned(),
+            return_type: "V".to_owned(),
+            parameters: Vec::new(),
+        },
+    };
+    let invocation = test_invocation(vec![DexValue::Reference(std::rc::Rc::from("stream"))]);
+
+    assert_eq!(
+        program.invoke_builtin_method(&method, Some(&invocation)),
+        Some(DexExecutionResult::Void)
+    );
+}
+
+fn java_io_method(
+    class_descriptor: &str,
+    name: &str,
+    return_type: &str,
+    parameters: &[&str],
+) -> DexMethodId {
+    DexMethodId {
+        class_descriptor: class_descriptor.to_owned(),
+        name: name.to_owned(),
+        proto: crate::dex::DexProto {
+            shorty: String::new(),
+            return_type: return_type.to_owned(),
+            parameters: parameters
+                .iter()
+                .map(|parameter| (*parameter).to_owned())
+                .collect(),
+        },
+    }
+}
+
+fn file_value(path: &str) -> DexValue {
+    DexValue::Reference(std::rc::Rc::from(format!("Ljava/io/File;:{path}")))
+}
+
+fn object_value(id: u64, class_descriptor: &str) -> DexValue {
+    DexValue::Object(DexObjectRef {
+        id,
+        class_descriptor: std::rc::Rc::from(class_descriptor),
+    })
+}
+
+struct GuestIoFixture {
+    root: PathBuf,
+    private: PathBuf,
+    device_private: PathBuf,
+    shared: PathBuf,
+}
+
+impl GuestIoFixture {
+    fn new(name: &str) -> Self {
+        static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "winedroid-java-io-{name}-{}-{id}",
+            std::process::id()
+        ));
+        let private = root.join("apps/com.example/data");
+        let device_private = root.join("apps/com.example/data_de");
+        let shared = root.join("storage");
+        fs::create_dir_all(&private).expect("private directory should exist");
+        fs::create_dir_all(&device_private).expect("device private directory should exist");
+        fs::create_dir_all(&shared).expect("shared directory should exist");
+
+        Self {
+            root,
+            private,
+            device_private,
+            shared,
+        }
+    }
+
+    fn program(&self) -> DexProgram {
+        DexProgram::with_guest_filesystem(
+            Vec::new(),
+            "com.example",
+            self.private.clone(),
+            self.shared.clone(),
+        )
+        .expect("guest filesystem program should initialize")
+    }
+
+    fn program_with_external_storage_policy(
+        &self,
+        external_storage_policy: ExternalStoragePolicy,
+    ) -> DexProgram {
+        DexProgram::with_guest_filesystem_and_external_storage_policy(
+            Vec::new(),
+            "com.example",
+            self.private.clone(),
+            self.shared.clone(),
+            external_storage_policy,
+        )
+        .expect("guest filesystem program should initialize")
+    }
+}
+
+impl Drop for GuestIoFixture {
+    fn drop(&mut self) {
+        fs::remove_dir_all(&self.root).ok();
+    }
+}

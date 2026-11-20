@@ -1,0 +1,13 @@
+[target.wasm32-unknown-emscripten]
+rustflags = [
+    "-C", "link-arg=--js-library=web/library_winedroid.js",
+    "-C", "link-arg=-sEXPORTED_FUNCTIONS=_main,_winedroid_web_launch,_winedroid_web_pointer_down,_winedroid_web_pointer_move,_winedroid_web_pointer_up,_winedroid_web_pointer_cancel,_winedroid_web_wheel,_winedroid_web_key,_winedroid_web_request_ui_dump",
+    "-C", "link-arg=-sEXPORTED_RUNTIME_METHODS=FS",
+    "-C", "link-arg=-sFORCE_FILESYSTEM=1",
+    "-C", "link-arg=-sALLOW_MEMORY_GROWTH=1",
+    "-C", "link-arg=-sINITIAL_MEMORY=268435456",
+    "-C", "link-arg=-sMAXIMUM_MEMORY=2147483648",
+    "-C", "link-arg=-sSTACK_SIZE=67108864",
+    "-C", "link-arg=-sEXIT_RUNTIME=0",
+    "-C", "link-arg=-sENVIRONMENT=web",
+]
