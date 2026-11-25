@@ -1453,7 +1453,7 @@ impl DexProgram {
             }
         }
 
-        // cite: frameworks-base View.java#generateViewId, setPaddingRelative, getFitsSystemWindows, removeCallbacks, postInvalidateOnAnimation, setHorizontalScrollBarEnabled
+        // cite: frameworks-base View.java#generateViewId, setPaddingRelative, getFitsSystemWindows, postInvalidateOnAnimation, setHorizontalScrollBarEnabled
         if method.class_descriptor == "Landroid/view/View;" {
             match (method.name.as_str(), method.proto.descriptor().as_str()) {
                 ("generateViewId", "()I") => {
@@ -1468,7 +1468,6 @@ impl DexProgram {
                     return Some(DexExecutionResult::Void);
                 }
                 ("getFitsSystemWindows", "()Z")
-                | ("removeCallbacks", "(Ljava/lang/Runnable;)Z")
                 | ("getLayoutDirection", "()I")
                 | ("isSelected", "()Z")
                 | ("getScrollX", "()I") => {

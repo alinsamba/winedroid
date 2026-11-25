@@ -921,7 +921,7 @@ mod tests {
     #[test]
     fn formats_effective_sdk_legacy_storage_and_permission_constraints() {
         // cite: frameworks-base PackageParser.java#DEFAULT_MIN_SDK_VERSION, DEFAULT_TARGET_SDK_VERSION, parseBaseApkCommon, parseBaseApplication, parseUsesPermission
-        // cite: frameworks-base ScanPackageUtils.java#applyPolicy
+        // cite: frameworks-base ApplicationInfo.java#PRIVATE_FLAG_DEFAULT_TO_DEVICE_PROTECTED_STORAGE, PRIVATE_FLAG_DIRECT_BOOT_AWARE
         let report = InspectionReport::for_test(AndroidManifest {
             min_sdk_version: Some("28".to_owned()),
             uses_sdk_declared: true,

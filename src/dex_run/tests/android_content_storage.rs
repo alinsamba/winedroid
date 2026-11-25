@@ -719,8 +719,7 @@ fn context_shared_preferences_persist_in_the_receivers_storage_domain() {
 #[test]
 fn cts_application_info_exposes_both_private_roots_and_credential_default() {
     // cite: cts ApplicationInfoTest.java#verifyDefaultValues
-    // cite: frameworks-base ScanPackageUtils.java#applyPolicy
-    // cite: frameworks-base ApplicationInfo.java#initForUser
+    // cite: frameworks-base ApplicationInfo.java#initForUser, PRIVATE_FLAG_DEFAULT_TO_DEVICE_PROTECTED_STORAGE, PRIVATE_FLAG_DIRECT_BOOT_AWARE
     let app_dir = test_app_data_dir("application_info_private_roots");
     let data_dir = app_dir.join("apps/com.example/data");
     let shared_dir = app_dir.join("storage");
@@ -878,7 +877,6 @@ fn sqlite_guest_vfs_uses_the_held_private_root_after_visible_replacement() {
 #[cfg(unix)]
 #[test]
 fn cts_sqlite_transactions_persist_through_guest_vfs_reopen() {
-    // cite: cts SQLiteDatabaseTest.java#testTransaction
     // cite: frameworks-base SQLiteOpenHelper.java#getDatabaseLocked
     let app_dir = test_app_data_dir("sqlite_transaction_reopen");
     let data_dir = app_dir.join("apps/com.example/data");

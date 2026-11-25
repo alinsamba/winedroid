@@ -66,12 +66,12 @@ impl AndroidManifest {
     }
 
     pub fn defaults_to_device_protected_storage(&self, is_system_app: bool) -> bool {
-        // cite: frameworks-base ScanPackageUtils.java#applyPolicy
+        // cite: frameworks-base ApplicationInfo.java#PRIVATE_FLAG_DEFAULT_TO_DEVICE_PROTECTED_STORAGE, PRIVATE_FLAG_DIRECT_BOOT_AWARE
         is_system_app && self.default_to_device_protected_storage.unwrap_or(false)
     }
 
     pub fn is_direct_boot_aware(&self, is_system_app: bool) -> bool {
-        // cite: frameworks-base ScanPackageUtils.java#applyPolicy
+        // cite: frameworks-base ApplicationInfo.java#PRIVATE_FLAG_DEFAULT_TO_DEVICE_PROTECTED_STORAGE, PRIVATE_FLAG_DIRECT_BOOT_AWARE
         is_system_app && self.direct_boot_aware.unwrap_or(false)
     }
 
@@ -1380,8 +1380,7 @@ mod tests {
 
     #[test]
     fn scan_package_policy_keeps_ordinary_app_contexts_credential_protected() {
-        // cite: frameworks-base ParsingPackageUtils.java#parseBaseAppBasicFlags
-        // cite: frameworks-base ScanPackageUtils.java#applyPolicy
+        // cite: frameworks-base ApplicationInfo.java#PRIVATE_FLAG_DEFAULT_TO_DEVICE_PROTECTED_STORAGE, PRIVATE_FLAG_DIRECT_BOOT_AWARE
         let declared = parse_events(&[
             start("manifest", Vec::new()),
             start(

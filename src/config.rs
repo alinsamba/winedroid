@@ -278,7 +278,7 @@ impl WinedroidUiMode {
 
     fn android_configuration_ui_mode(self) -> i32 {
         match self {
-            // cite: frameworks-base UiModeManagerService.java#updateConfigurationLocked
+            // cite: frameworks-base UiModeManager.java#MODE_NIGHT_NO
             Self::System => UI_MODE_TYPE_NORMAL | UI_MODE_NIGHT_NO,
             Self::Light => UI_MODE_TYPE_NORMAL | UI_MODE_NIGHT_NO,
             Self::Dark => UI_MODE_TYPE_NORMAL | UI_MODE_NIGHT_YES,
